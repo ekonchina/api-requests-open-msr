@@ -1,0 +1,2165 @@
+# Bundled project sources
+# Root: /Users/ekaterina/Documents/GitHub/api-requests-open-msr
+# Files: 30
+
+
+#====================================================================================================
+# FILE: checks/patient_checks.py
+#====================================================================================================
+
+def assert_valid_patient_response(patient: dict) -> None:
+    # --- patient ---
+    assert isinstance(patient, dict)
+    assert "uuid" in patient and isinstance(patient["uuid"], str)
+    assert patient.get("voided") is False
+
+    # --- person ---
+    person = patient.get("person")
+    assert isinstance(person, dict)
+
+    assert "uuid" in person
+    assert person["uuid"] == patient["uuid"]
+
+    assert person.get("gender") in {"M", "F", "O", "U"}
+    assert "birthdate" in person
+    assert isinstance(person["birthdate"], str)
+
+    preferred_name = person.get("preferredName")
+    assert isinstance(preferred_name, dict)
+    assert isinstance(preferred_name.get("display"), str)
+    assert preferred_name["display"].strip() != ""
+
+    # --- identifiers ---
+    identifiers = patient.get("identifiers")
+    assert isinstance(identifiers, list)
+    assert len(identifiers) > 0
+
+    openmrs_ids = [
+        i for i in identifiers
+        if "OpenMRS ID" in i.get("display", "")
+    ]
+    assert len(openmrs_ids) >= 1
+
+    for identifier in openmrs_ids:
+        assert "uuid" in identifier
+        assert isinstance(identifier["uuid"], str)
+        assert "display" in identifier
+        assert isinstance(identifier["display"], str)
+
+#====================================================================================================
+# FILE: request_modules/create_random_valid_person.py
+#====================================================================================================
+
+import random
+import uuid
+import requests
+from requests.auth import HTTPBasicAuth
+from faker import Faker
+
+from src.openmrs_patient import Person, Address, PersonName
+
+fake = Faker("ru_RU")
+
+BASE_URL = "http://localhost/openmrs/ws/rest/v1"
+USERNAME = "admin"
+PASSWORD = "Admin123"
+
+
+def _fetch_person_full(person_uuid: str) -> dict:
+    url = f"{BASE_URL}/person/{person_uuid}"
+    r = requests.get(
+        url,
+        params={"v": "full"},
+        auth=HTTPBasicAuth(USERNAME, PASSWORD),
+        headers={"Accept": "application/json"},
+        timeout=30,
+    )
+    r.raise_for_status()
+    return r.json()
+
+
+def person_from_json(data: dict) -> Person:
+    def parse_names(obj: dict) -> list[PersonName]:
+        names_local: list[PersonName] = []
+
+        preferred = obj.get("preferredName")
+        if isinstance(preferred, dict) and preferred.get("givenName") and preferred.get("familyName"):
+            names_local.append(PersonName(givenName=preferred["givenName"], familyName=preferred["familyName"]))
+
+        for n in obj.get("names", []) or []:
+            if isinstance(n, dict) and n.get("givenName") and n.get("familyName"):
+                if not any(x.givenName == n["givenName"] and x.familyName == n["familyName"] for x in names_local):
+                    names_local.append(PersonName(givenName=n["givenName"], familyName=n["familyName"]))
+
+        return names_local
+
+    names = parse_names(data)
+
+    if not names:
+        person_uuid = data.get("uuid")
+        if person_uuid:
+            full_data = _fetch_person_full(person_uuid)
+            names = parse_names(full_data)
+            data = full_data
+
+    if not names:
+        raise ValueError(
+            "OpenMRS returned Person without parseable names. "
+            f"uuid={data.get('uuid')}, keys={list(data.keys())}"
+        )
+
+    raw_addresses = data.get("addresses") or []
+    addresses: list[Address] = [
+        Address(address1=a.get("address1", ""), cityVillage=a.get("cityVillage", ""))
+        for a in raw_addresses
+        if isinstance(a, dict)
+    ]
+
+    return Person(
+        names=names,
+        gender=data.get("gender", ""),
+        birthdate=data.get("birthdate", ""),
+        addresses=addresses,
+    )
+
+
+def generate_person_payload() -> dict:
+    gender = random.choice(["M", "F"])
+    return {
+        "names": [
+            {
+                "givenName": fake.first_name_male() if gender == "M" else fake.first_name_female(),
+                "familyName": fake.last_name(),
+                "preferred": True,
+            }
+        ],
+        "gender": gender,
+        "birthdate": fake.date_of_birth(minimum_age=18, maximum_age=80).isoformat(),
+    }
+
+
+def create_valid_person() -> Person:
+    url = f"{BASE_URL}/person"
+    payload = generate_person_payload()
+
+    response = requests.post(
+        url,
+        json=payload,
+        auth=HTTPBasicAuth(USERNAME, PASSWORD),
+        headers={"Accept": "application/json", "Content-Type": "application/json"},
+        timeout=30,
+    )
+
+    print("Payload:", payload)
+    print("Status:", response.status_code)
+    print("Response:", response.text)
+
+    response.raise_for_status()
+    return person_from_json(response.json())
+
+
+# =======================
+# ✅ ДОБАВЛЕНО ПО ОШИБКЕ MissingRequiredIdentifierException
+# =======================
+
+def get_required_identifier_type_uuid(required_name: str = "OpenMRS ID") -> str:
+    """
+    Находит UUID обязательного identifier type (по умолчанию OpenMRS ID).
+    """
+    url = f"{BASE_URL}/patientidentifiertype"
+    r = requests.get(
+        url,
+        params={"v": "default"},
+        auth=HTTPBasicAuth(USERNAME, PASSWORD),
+        headers={"Accept": "application/json"},
+        timeout=30,
+    )
+    r.raise_for_status()
+
+    for item in r.json().get("results", []):
+        if item.get("required") is True and item.get("name") == required_name:
+            return item["uuid"]
+
+    raise RuntimeError(f"Required identifier type '{required_name}' not found")
+
+
+def generate_required_identifier_value() -> str:
+    """
+    Генерирует значение для required идентификатора.
+    (Если в системе настроен строгий формат для OpenMRS ID — подстроим генерацию.)
+    """
+    # универсально для тестов: уникальная строка
+    return str(uuid.uuid4())
+
+
+def get_required_openmrs_id() -> tuple[str, str]:
+    """
+    Возвращает (openmrs_id_type_uuid, generated_openmrs_id_value)
+    """
+    id_type_uuid = get_required_identifier_type_uuid("OpenMRS ID")
+    value = generate_required_identifier_value()
+    return id_type_uuid, value
+
+#====================================================================================================
+# FILE: request_modules/create_valid_patient_with_person.py
+#====================================================================================================
+
+
+import requests
+from requests.auth import HTTPBasicAuth
+
+from src.openmrs_patient import PatientPayload, Person, PersonName, Address, Identifier
+
+
+
+
+def create_valid_patient_with_person(username:str, password: str, person: Person, location: str, identifier_type: str, patient_identifier: str):
+    # --- config ---
+    BASE_URL = "http://localhost/openmrs/ws/rest/v1"
+
+
+
+    patient_identifier = patient_identifier
+
+
+    payload = PatientPayload(
+        person=person,
+        identifiers=[
+            Identifier(
+                identifier=patient_identifier,
+                identifierType=identifier_type,
+                location=location,
+            )
+        ],
+    )
+
+
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+
+
+    auth = HTTPBasicAuth(username, password)
+
+
+    resp = requests.post(
+        f"{BASE_URL}/patient",
+        headers=headers,
+        json=payload.to_dict(),
+        auth=auth,
+    )
+
+    assert resp.status_code == 201
+
+
+    return resp.json()
+
+
+def create_in_valid_patient_with_person(username:str, password: str, person: Person, location: str, identifier_type: str, patient_identifier: str):
+    # --- config ---
+    BASE_URL = "http://localhost/openmrs/ws/rest/v1"
+
+
+
+    patient_identifier = patient_identifier
+
+
+    payload = PatientPayload(
+        person=person,
+        identifiers=[
+            Identifier(
+                identifier=patient_identifier,
+                identifierType=identifier_type,
+                location=location,
+            )
+        ],
+    )
+
+
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+
+
+    auth = HTTPBasicAuth(username, password)
+
+
+    resp = requests.post(
+        f"{BASE_URL}/patient",
+        headers=headers,
+        json=payload.to_dict(),
+        auth=auth,
+    )
+
+    assert resp.status_code == 400
+
+
+    return resp
+
+
+#====================================================================================================
+# FILE: request_modules/find_patient/find_patient.py
+#====================================================================================================
+
+import requests
+from requests.auth import HTTPBasicAuth
+from typing import Optional
+
+BASE_URL = "http://localhost/openmrs/ws/rest/v1"
+USERNAME = "admin"
+PASSWORD = "Admin123"
+
+
+def find_patient_by_identifier(identifier: str) -> Optional[dict]:
+    """
+    Ищет пациента по identifier.
+    Возвращает patient object (dict) или None.
+    """
+    url = f"{BASE_URL}/patient"
+
+    response = requests.get(
+        url,
+        params={
+            "q": identifier,
+            "v": "default",
+        },
+        auth=HTTPBasicAuth(USERNAME, PASSWORD),
+        headers={"Accept": "application/json"},
+        timeout=30,
+    )
+
+    response.raise_for_status()
+    data = response.json()
+
+    results = data.get("results", [])
+    if not results:
+        return None
+
+    # обычно identifier уникален → берём первого
+    return results[0]
+
+#====================================================================================================
+# FILE: request_modules/locations/get_all_locations.py
+#====================================================================================================
+
+import requests
+from requests.auth import HTTPBasicAuth
+
+# ==== НАСТРОЙКИ ====
+BASE_URL = "http://localhost/openmrs/ws/rest/v1"
+USERNAME = "admin"
+PASSWORD = "Admin123"
+
+URL = f"{BASE_URL}/location"
+
+# ==== ЗАПРОС ====
+response = requests.get(
+    URL,
+    auth=HTTPBasicAuth(USERNAME, PASSWORD),
+    headers={"Accept": "application/json"}
+)
+
+response.raise_for_status()
+data = response.json()
+
+# ==== ВЫВОД ====
+print("\n📍 Список локаций OpenMRS\n" + "=" * 40)
+
+for idx, loc in enumerate(data.get("results", []), start=1):
+    name = loc.get("name", "—")
+    print(f"\n{idx}. {name}")
+    print("-" * (len(name) + 4))
+    print(f"UUID       : {loc.get('uuid')}")
+    print(f"Описание  : {loc.get('description') or '—'}")
+    print(f"Retired   : {loc.get('retired')}")
+
+print("\n✅ Готово")
+
+#====================================================================================================
+# FILE: request_modules/locations/get_random_valid_location.py
+#====================================================================================================
+
+import requests
+from requests.auth import HTTPBasicAuth
+import random
+
+
+
+def get_random_valid_location():
+    BASE_URL = "http://localhost/openmrs/ws/rest/v1"
+    USERNAME = "admin"
+    PASSWORD = "Admin123"
+
+    url = f"{BASE_URL}/location"
+
+    response = requests.get(
+        url,
+        auth=HTTPBasicAuth(USERNAME, PASSWORD),
+        headers={"Accept": "application/json"},
+        timeout=30,
+    )
+
+    locations = response.json().get("results", [])
+
+    if not locations:
+        raise RuntimeError("Список локаций пуст")
+
+    return random.choice(locations)
+
+#====================================================================================================
+# FILE: request_modules/locations/make_location_retiered.py
+#====================================================================================================
+
+import requests
+from requests.auth import HTTPBasicAuth
+
+# ==== НАСТРОЙКИ ====
+BASE_URL = "http://localhost/openmrs/ws/rest/v1"
+USERNAME = "admin"
+PASSWORD = "Admin123"
+
+LOCATION_UUID = "6d49188b-2bdf-4c6e-bdff-7eeed3e15a64"
+REASON = "Location is no longer in use"
+
+URL = f"{BASE_URL}/location/{LOCATION_UUID}"
+
+# ==== ЗАПРОС ====
+response = requests.delete(
+    URL,
+    auth=HTTPBasicAuth(USERNAME, PASSWORD),
+    headers={"Accept": "application/json"},
+    params={"reason": REASON}
+)
+
+response.raise_for_status()
+
+print(f"✅ Location {LOCATION_UUID} помечена как retired")
+
+#====================================================================================================
+# FILE: request_modules/patientidentifiertype/get_all_patientidentifiertype.py
+#====================================================================================================
+
+import requests
+from requests.auth import HTTPBasicAuth
+
+BASE_URL = "http://localhost/openmrs/ws/rest/v1"
+USERNAME = "admin"
+PASSWORD = "Admin123"  # замени на свой пароль
+
+url = f"{BASE_URL}/patientidentifiertype"
+
+response = requests.get(
+    url,
+    params={"v": "default"},
+    auth=HTTPBasicAuth(USERNAME, PASSWORD),
+    headers={"Accept": "application/json"}
+)
+
+response.raise_for_status()
+
+data = response.json()
+
+for item in data.get("results", []):
+    print(f"Name: {item['name']}")
+    print(f"UUID: {item['uuid']}")
+    print(f"Required: {item.get('required')}")
+    print(f"Format: {item.get('format')}")
+    print("-" * 40)
+
+#====================================================================================================
+# FILE: request_modules/patientidentifiertype/get_random_valid_patient_identifier_type.py
+#====================================================================================================
+
+import random
+import string
+import re
+import requests
+from requests.auth import HTTPBasicAuth
+from typing import Optional, Tuple
+
+BASE_URL = "http://localhost/openmrs/ws/rest/v1"
+USERNAME = "admin"
+PASSWORD = "Admin123"
+
+
+def generate_identifier_from_format(fmt: str) -> str:
+    """
+    Генерирует identifier_value для известного формата
+    ^[A-Z]{1}-[0-9]{7}$
+    """
+    if fmt == "^[A-Z]{1}-[0-9]{7}$":
+        letter = random.choice(string.ascii_uppercase)
+        digits = "".join(random.choices(string.digits, k=7))
+        return f"{letter}-{digits}"
+
+    raise ValueError(f"Unsupported identifier format: {fmt}")
+
+
+def get_identifier_type_with_generated_value() -> Optional[Tuple[str, str]]:
+    """
+    Возвращает (identifier_type_uuid, generated_identifier_value)
+    """
+    url = f"{BASE_URL}/patientidentifiertype"
+
+    response = requests.get(
+        url,
+        params={"v": "default"},
+        auth=HTTPBasicAuth(USERNAME, PASSWORD),
+        headers={"Accept": "application/json"}
+    )
+    response.raise_for_status()
+
+    data = response.json()
+
+    for item in data.get("results", []):
+        fmt = item.get("format")
+        if not fmt:
+            continue
+
+        identifier_value = generate_identifier_from_format(fmt)
+
+        # финальная проверка (на всякий случай)
+        if re.fullmatch(fmt, identifier_value):
+            return item["uuid"], identifier_value
+
+    return None
+
+def generate_random_openmrs_identifier(length: int = 8) -> str:
+    """
+    Генерирует простой клиентский OpenMRS identifier
+    (цифры, без проверки Luhn)
+    """
+    return "".join(random.choices(string.digits, k=length))
+
+
+
+MOD30_ALPHABET = "0123456789ACDEFGHJKLMNPRTUVWXY"
+MOD30_MAP = {c: i for i, c in enumerate(MOD30_ALPHABET)}
+
+def _luhn_mod30_sum(chars: str, *, start_double: bool) -> int:
+    total = 0
+    double = start_double
+    for ch in reversed(chars):
+        if ch not in MOD30_MAP:
+            raise ValueError(f"Unallowed character '{ch}' for OpenMRS Mod30")
+        v = MOD30_MAP[ch]
+        if double:
+            v *= 2
+            # "сумма цифр" в базе 30
+            v = (v // 30) + (v % 30)
+        total += v
+        double = not double
+    return total
+
+def luhn_mod30_check_char(payload: str) -> str:
+    # ВАЖНО: для payload начинаем с удвоения справа,
+    # потому что в полном ID справа будет check digit (не удваивается),
+    # а ближайший слева символ (правый символ payload) удваивается.
+    total = _luhn_mod30_sum(payload, start_double=True)
+    check_val = (30 - (total % 30)) % 30
+    return MOD30_ALPHABET[check_val]
+
+def generate_openmrs_id(payload_length: int = 7) -> str:
+    payload = "".join(random.choices(MOD30_ALPHABET, k=payload_length))
+    return payload + luhn_mod30_check_char(payload)
+
+def get_openmrs_id_identifier() -> Tuple[str, str]:
+    """
+    Возвращает (uuid типа 'OpenMRS ID', generated_identifier_value),
+    где identifier_value проходит LuhnMod30IdentifierValidator.
+    """
+    url = f"{BASE_URL}/patientidentifiertype"
+    resp = requests.get(
+        url,
+        params={"v": "default"},
+        auth=HTTPBasicAuth(USERNAME, PASSWORD),
+        headers={"Accept": "application/json"},
+    )
+    resp.raise_for_status()
+
+    for item in resp.json().get("results", []):
+        if item.get("name") == "OpenMRS ID":
+            return item["uuid"], generate_openmrs_id(payload_length=7)
+
+    raise RuntimeError("PatientIdentifierType 'OpenMRS ID' not found")
+
+#====================================================================================================
+# FILE: roles/create_role_with_add_patients_only.py
+#====================================================================================================
+
+# не работает
+
+import requests
+from requests.auth import HTTPBasicAuth
+
+BASE_URL = "http://localhost/openmrs/ws/rest/v1"
+auth = HTTPBasicAuth("admin", "Admin123")
+
+ROLE_NAME = "Custom: Add Patients Only"
+DESCRIPTION = "Can add patients but cannot add people/identifiers"
+
+def create_role():
+    r = requests.post(
+        f"{BASE_URL}/role",
+        json={
+            "name": ROLE_NAME,
+            "description": DESCRIPTION,
+        },
+        headers={"Accept": "application/json", "Content-Type": "application/json"},
+        auth=auth,
+        timeout=30,
+    )
+    print("create role status:", r.status_code)
+    print(r.text)
+    r.raise_for_status()
+    return r.json()
+
+if __name__ == "__main__":
+    created = create_role()
+    print("role uuid:", created.get("uuid"))
+
+#====================================================================================================
+# FILE: roles/get_all_roles.py
+#====================================================================================================
+
+import requests
+from requests.auth import HTTPBasicAuth
+
+BASE_URL = "http://localhost/openmrs/ws/rest/v1"
+auth = HTTPBasicAuth("admin", "Admin123")
+
+url = f"{BASE_URL}/role?v=default&limit=100"
+data = requests.get(url, auth=auth, headers={"Accept": "application/json"}).json()
+
+for r in data.get("results", []):
+    print(r.get("display"), r.get("uuid"))
+
+#====================================================================================================
+# FILE: roles/get_get_role_privileges.py
+#====================================================================================================
+
+import requests
+from requests.auth import HTTPBasicAuth
+
+BASE_URL = "http://localhost/openmrs/ws/rest/v1"
+auth = HTTPBasicAuth("admin", "Admin123")
+
+ROLE_UUIDS = [
+    "246f8412-01fb-4e55-86d7-6441cd1b81a5",
+    "a142aa96-772a-4d09-b80c-b3a78687b189",
+    "d8ddab2c-20a5-4a3c-b209-856c7fe839cd",
+    "7f04f24c-e433-4bc7-95cd-975b6f003207",
+    "66fa1ec4-5d30-4127-a693-d8b1f9519a14",
+    "9873dba9-484f-42c2-a98d-f224bd65117a",
+    "dc978fe8-b574-4e11-be54-626ae2d28ed8",
+    "eba658df-fa88-4dab-b000-57e1e5cb2e43",
+    "fb393086-d6ec-4bcb-a300-5815a554c4ae",
+    "2d09a0e2-240a-4dd7-9c3e-9e2cd2cb2d1f",
+    "58f60da3-03bd-4b57-bb3c-429b50f6939b",
+    "564b560e-3fe8-4829-8be4-68ddb40cf106",
+    "93a9c2f8-9296-488f-9451-43667e1c4d7f",
+    "f7fd42ef-880e-40c5-972d-e4ae7c990de2",
+    "2083fd40-3391-11ed-a667-507b9dea1806",
+    "d210eb66-2188-11ed-9dff-507b9dea1806",
+    "84bdd876-4694-11ed-8109-00155dcc3fc0",
+    "cca4be4b-2188-11ed-9dff-507b9dea1806",
+    "8ee2f2ac-467f-11ed-8109-00155dcc3fc0",
+    "a49be648-6b0a-11ed-93a2-806d973f13a9",
+    "4ef1f0f9-fee6-414b-910d-28e17df345c2",
+    "2749cd1b-251a-4d8b-bc35-0165f2b1af3e",
+    "fab43ac4-79bc-4f3d-805b-bd3a82ce41e9",
+    "2f087f90-9c47-4262-bfce-23c7862e727e",
+    "ab2160f6-0941-430c-9752-6714353fbd3c",
+    "f089471c-e00b-468e-96e8-46aea1b339af",
+    "8d94f280-c2cc-11de-8d13-0010c6dffd0f",
+    "7d8d214d-2188-11ed-9dff-507b9dea1806",
+    "8d94f852-c2cc-11de-8d13-0010c6dffd0f",
+]
+
+def get_role_privileges(role_uuid: str):
+    url = f"{BASE_URL}/role/{role_uuid}"
+    r = requests.get(
+        url,
+        params={"v": "full"},
+        headers={"Accept": "application/json"},
+        auth=auth,
+        timeout=30,
+    )
+
+    print(f"\n=== ROLE {role_uuid} ===")
+    print("status:", r.status_code)
+
+    r.raise_for_status()
+    data = r.json()
+
+    role_name = data.get("display") or data.get("name")
+    print("role:", role_name)
+
+    privileges = data.get("privileges", [])
+    if not privileges:
+        print("  (no privileges)")
+        return
+
+    for p in privileges:
+        print(" -", p.get("display"))
+
+if __name__ == "__main__":
+    for role_uuid in ROLE_UUIDS:
+        try:
+            get_role_privileges(role_uuid)
+        except requests.HTTPError as e:
+            print("ERROR:", e)
+        except requests.RequestException as e:
+            print("REQUEST ERROR:", e)
+
+#====================================================================================================
+# FILE: roles/get_roles_with_add_identifiers.py
+#====================================================================================================
+
+import requests
+from requests.auth import HTTPBasicAuth
+
+BASE_URL = "http://localhost/openmrs/ws/rest/v1"
+auth = HTTPBasicAuth("admin", "Admin123")
+
+ROLE_UUIDS = [
+    "246f8412-01fb-4e55-86d7-6441cd1b81a5",
+    "a142aa96-772a-4d09-b80c-b3a78687b189",
+    "d8ddab2c-20a5-4a3c-b209-856c7fe839cd",
+    "7f04f24c-e433-4bc7-95cd-975b6f003207",
+    "66fa1ec4-5d30-4127-a693-d8b1f9519a14",
+    "9873dba9-484f-42c2-a98d-f224bd65117a",
+    "dc978fe8-b574-4e11-be54-626ae2d28ed8",
+    "eba658df-fa88-4dab-b000-57e1e5cb2e43",
+    "fb393086-d6ec-4bcb-a300-5815a554c4ae",
+    "2d09a0e2-240a-4dd7-9c3e-9e2cd2cb2d1f",
+    "58f60da3-03bd-4b57-bb3c-429b50f6939b",
+    "564b560e-3fe8-4829-8be4-68ddb40cf106",
+    "93a9c2f8-9296-488f-9451-43667e1c4d7f",
+    "f7fd42ef-880e-40c5-972d-e4ae7c990de2",
+    "2083fd40-3391-11ed-a667-507b9dea1806",
+    "d210eb66-2188-11ed-9dff-507b9dea1806",
+    "84bdd876-4694-11ed-8109-00155dcc3fc0",
+    "cca4be4b-2188-11ed-9dff-507b9dea1806",
+    "8ee2f2ac-467f-11ed-8109-00155dcc3fc0",
+    "a49be648-6b0a-11ed-93a2-806d973f13a9",
+    "4ef1f0f9-fee6-414b-910d-28e17df345c2",
+    "2749cd1b-251a-4d8b-bc35-0165f2b1af3e",
+    "fab43ac4-79bc-4f3d-805b-bd3a82ce41e9",
+    "2f087f90-9c47-4262-bfce-23c7862e727e",
+    "ab2160f6-0941-430c-9752-6714353fbd3c",
+    "f089471c-e00b-468e-96e8-46aea1b339af",
+    "8d94f280-c2cc-11de-8d13-0010c6dffd0f",
+    "7d8d214d-2188-11ed-9dff-507b9dea1806",
+    "8d94f852-c2cc-11de-8d13-0010c6dffd0f",
+]
+
+if __name__ == "__main__":
+    print("Roles with privilege: Add People\n")
+
+    for role_uuid in ROLE_UUIDS:
+        r = requests.get(
+            f"{BASE_URL}/role/{role_uuid}",
+            params={"v": "full"},
+            auth=auth,
+        )
+        r.raise_for_status()
+        data = r.json()
+
+        privileges = {p.get("display") for p in data.get("privileges", [])}
+
+        if "Add Patient Identifiers" in privileges:
+            print(f"- {data.get('display')} ({role_uuid})")
+
+#====================================================================================================
+# FILE: roles/get_roles_with_add_patient.py
+#====================================================================================================
+
+import requests
+from requests.auth import HTTPBasicAuth
+
+BASE_URL = "http://localhost/openmrs/ws/rest/v1"
+auth = HTTPBasicAuth("admin", "Admin123")
+
+ROLE_UUIDS = [
+    "246f8412-01fb-4e55-86d7-6441cd1b81a5",
+    "a142aa96-772a-4d09-b80c-b3a78687b189",
+    "d8ddab2c-20a5-4a3c-b209-856c7fe839cd",
+    "7f04f24c-e433-4bc7-95cd-975b6f003207",
+    "66fa1ec4-5d30-4127-a693-d8b1f9519a14",
+    "9873dba9-484f-42c2-a98d-f224bd65117a",
+    "dc978fe8-b574-4e11-be54-626ae2d28ed8",
+    "eba658df-fa88-4dab-b000-57e1e5cb2e43",
+    "fb393086-d6ec-4bcb-a300-5815a554c4ae",
+    "2d09a0e2-240a-4dd7-9c3e-9e2cd2cb2d1f",
+    "58f60da3-03bd-4b57-bb3c-429b50f6939b",
+    "564b560e-3fe8-4829-8be4-68ddb40cf106",
+    "93a9c2f8-9296-488f-9451-43667e1c4d7f",
+    "f7fd42ef-880e-40c5-972d-e4ae7c990de2",
+    "2083fd40-3391-11ed-a667-507b9dea1806",
+    "d210eb66-2188-11ed-9dff-507b9dea1806",
+    "84bdd876-4694-11ed-8109-00155dcc3fc0",
+    "cca4be4b-2188-11ed-9dff-507b9dea1806",
+    "8ee2f2ac-467f-11ed-8109-00155dcc3fc0",
+    "a49be648-6b0a-11ed-93a2-806d973f13a9",
+    "4ef1f0f9-fee6-414b-910d-28e17df345c2",
+    "2749cd1b-251a-4d8b-bc35-0165f2b1af3e",
+    "fab43ac4-79bc-4f3d-805b-bd3a82ce41e9",
+    "2f087f90-9c47-4262-bfce-23c7862e727e",
+    "ab2160f6-0941-430c-9752-6714353fbd3c",
+    "f089471c-e00b-468e-96e8-46aea1b339af",
+    "8d94f280-c2cc-11de-8d13-0010c6dffd0f",
+    "7d8d214d-2188-11ed-9dff-507b9dea1806",
+    "8d94f852-c2cc-11de-8d13-0010c6dffd0f",
+]
+
+if __name__ == "__main__":
+    print("Roles with privilege: Add Patients\n")
+
+    for role_uuid in ROLE_UUIDS:
+        r = requests.get(
+            f"{BASE_URL}/role/{role_uuid}",
+            params={"v": "full"},
+            auth=auth,
+        )
+        r.raise_for_status()
+        data = r.json()
+
+        privileges = {p.get("display") for p in data.get("privileges", [])}
+
+        if "Add Patients" in privileges:
+            print(f"- {data.get('display')} ({role_uuid})")
+
+#====================================================================================================
+# FILE: roles/get_roles_with_add_people.py
+#====================================================================================================
+
+import requests
+from requests.auth import HTTPBasicAuth
+
+BASE_URL = "http://localhost/openmrs/ws/rest/v1"
+auth = HTTPBasicAuth("admin", "Admin123")
+
+ROLE_UUIDS = [
+    "246f8412-01fb-4e55-86d7-6441cd1b81a5",
+    "a142aa96-772a-4d09-b80c-b3a78687b189",
+    "d8ddab2c-20a5-4a3c-b209-856c7fe839cd",
+    "7f04f24c-e433-4bc7-95cd-975b6f003207",
+    "66fa1ec4-5d30-4127-a693-d8b1f9519a14",
+    "9873dba9-484f-42c2-a98d-f224bd65117a",
+    "dc978fe8-b574-4e11-be54-626ae2d28ed8",
+    "eba658df-fa88-4dab-b000-57e1e5cb2e43",
+    "fb393086-d6ec-4bcb-a300-5815a554c4ae",
+    "2d09a0e2-240a-4dd7-9c3e-9e2cd2cb2d1f",
+    "58f60da3-03bd-4b57-bb3c-429b50f6939b",
+    "564b560e-3fe8-4829-8be4-68ddb40cf106",
+    "93a9c2f8-9296-488f-9451-43667e1c4d7f",
+    "f7fd42ef-880e-40c5-972d-e4ae7c990de2",
+    "2083fd40-3391-11ed-a667-507b9dea1806",
+    "d210eb66-2188-11ed-9dff-507b9dea1806",
+    "84bdd876-4694-11ed-8109-00155dcc3fc0",
+    "cca4be4b-2188-11ed-9dff-507b9dea1806",
+    "8ee2f2ac-467f-11ed-8109-00155dcc3fc0",
+    "a49be648-6b0a-11ed-93a2-806d973f13a9",
+    "4ef1f0f9-fee6-414b-910d-28e17df345c2",
+    "2749cd1b-251a-4d8b-bc35-0165f2b1af3e",
+    "fab43ac4-79bc-4f3d-805b-bd3a82ce41e9",
+    "2f087f90-9c47-4262-bfce-23c7862e727e",
+    "ab2160f6-0941-430c-9752-6714353fbd3c",
+    "f089471c-e00b-468e-96e8-46aea1b339af",
+    "8d94f280-c2cc-11de-8d13-0010c6dffd0f",
+    "7d8d214d-2188-11ed-9dff-507b9dea1806",
+    "8d94f852-c2cc-11de-8d13-0010c6dffd0f",
+]
+
+if __name__ == "__main__":
+    print("Roles with privilege: Add People\n")
+
+    for role_uuid in ROLE_UUIDS:
+        r = requests.get(
+            f"{BASE_URL}/role/{role_uuid}",
+            params={"v": "full"},
+            auth=auth,
+        )
+        r.raise_for_status()
+        data = r.json()
+
+        privileges = {p.get("display") for p in data.get("privileges", [])}
+
+        if "Add People" in privileges:
+            print(f"- {data.get('display')} ({role_uuid})")
+
+#====================================================================================================
+# FILE: roles/get_roles_with_edit_patient_identifiers.py
+#====================================================================================================
+
+import requests
+from requests.auth import HTTPBasicAuth
+
+BASE_URL = "http://localhost/openmrs/ws/rest/v1"
+auth = HTTPBasicAuth("admin", "Admin123")
+
+ROLE_UUIDS = [
+    "246f8412-01fb-4e55-86d7-6441cd1b81a5",
+    "a142aa96-772a-4d09-b80c-b3a78687b189",
+    "d8ddab2c-20a5-4a3c-b209-856c7fe839cd",
+    "7f04f24c-e433-4bc7-95cd-975b6f003207",
+    "66fa1ec4-5d30-4127-a693-d8b1f9519a14",
+    "9873dba9-484f-42c2-a98d-f224bd65117a",
+    "dc978fe8-b574-4e11-be54-626ae2d28ed8",
+    "eba658df-fa88-4dab-b000-57e1e5cb2e43",
+    "fb393086-d6ec-4bcb-a300-5815a554c4ae",
+    "2d09a0e2-240a-4dd7-9c3e-9e2cd2cb2d1f",
+    "58f60da3-03bd-4b57-bb3c-429b50f6939b",
+    "564b560e-3fe8-4829-8be4-68ddb40cf106",
+    "93a9c2f8-9296-488f-9451-43667e1c4d7f",
+    "f7fd42ef-880e-40c5-972d-e4ae7c990de2",
+    "2083fd40-3391-11ed-a667-507b9dea1806",
+    "d210eb66-2188-11ed-9dff-507b9dea1806",
+    "84bdd876-4694-11ed-8109-00155dcc3fc0",
+    "cca4be4b-2188-11ed-9dff-507b9dea1806",
+    "8ee2f2ac-467f-11ed-8109-00155dcc3fc0",
+    "a49be648-6b0a-11ed-93a2-806d973f13a9",
+    "4ef1f0f9-fee6-414b-910d-28e17df345c2",
+    "2749cd1b-251a-4d8b-bc35-0165f2b1af3e",
+    "fab43ac4-79bc-4f3d-805b-bd3a82ce41e9",
+    "2f087f90-9c47-4262-bfce-23c7862e727e",
+    "ab2160f6-0941-430c-9752-6714353fbd3c",
+    "f089471c-e00b-468e-96e8-46aea1b339af",
+    "8d94f280-c2cc-11de-8d13-0010c6dffd0f",
+    "7d8d214d-2188-11ed-9dff-507b9dea1806",
+    "8d94f852-c2cc-11de-8d13-0010c6dffd0f",
+]
+
+if __name__ == "__main__":
+    print("Roles with privilege: Add People\n")
+
+    for role_uuid in ROLE_UUIDS:
+        r = requests.get(
+            f"{BASE_URL}/role/{role_uuid}",
+            params={"v": "full"},
+            auth=auth,
+        )
+        r.raise_for_status()
+        data = r.json()
+
+        privileges = {p.get("display") for p in data.get("privileges", [])}
+
+        if "Edit Patient Identifiers" in privileges:
+            print(f"- {data.get('display')} ({role_uuid})")
+
+#====================================================================================================
+# FILE: roles/get_without_any_patient_creation_privileges.py
+#====================================================================================================
+
+import requests
+from requests.auth import HTTPBasicAuth
+
+BASE_URL = "http://localhost/openmrs/ws/rest/v1"
+auth = HTTPBasicAuth("admin", "Admin123")
+
+ROLE_UUIDS = [
+    "246f8412-01fb-4e55-86d7-6441cd1b81a5",
+    "a142aa96-772a-4d09-b80c-b3a78687b189",
+    "d8ddab2c-20a5-4a3c-b209-856c7fe839cd",
+    "7f04f24c-e433-4bc7-95cd-975b6f003207",
+    "66fa1ec4-5d30-4127-a693-d8b1f9519a14",
+    "9873dba9-484f-42c2-a98d-f224bd65117a",
+    "dc978fe8-b574-4e11-be54-626ae2d28ed8",
+    "eba658df-fa88-4dab-b000-57e1e5cb2e43",
+    "fb393086-d6ec-4bcb-a300-5815a554c4ae",
+    "2d09a0e2-240a-4dd7-9c3e-9e2cd2cb2d1f",
+    "58f60da3-03bd-4b57-bb3c-429b50f6939b",
+    "564b560e-3fe8-4829-8be4-68ddb40cf106",
+    "93a9c2f8-9296-488f-9451-43667e1c4d7f",
+    "f7fd42ef-880e-40c5-972d-e4ae7c990de2",
+    "2083fd40-3391-11ed-a667-507b9dea1806",
+    "d210eb66-2188-11ed-9dff-507b9dea1806",
+    "84bdd876-4694-11ed-8109-00155dcc3fc0",
+    "cca4be4b-2188-11ed-9dff-507b9dea1806",
+    "8ee2f2ac-467f-11ed-8109-00155dcc3fc0",
+    "a49be648-6b0a-11ed-93a2-806d973f13a9",
+    "4ef1f0f9-fee6-414b-910d-28e17df345c2",
+    "2749cd1b-251a-4d8b-bc35-0165f2b1af3e",
+    "fab43ac4-79bc-4f3d-805b-bd3a82ce41e9",
+    "2f087f90-9c47-4262-bfce-23c7862e727e",
+    "ab2160f6-0941-430c-9752-6714353fbd3c",
+    "f089471c-e00b-468e-96e8-46aea1b339af",
+    "8d94f280-c2cc-11de-8d13-0010c6dffd0f",
+    "7d8d214d-2188-11ed-9dff-507b9dea1806",
+    "8d94f852-c2cc-11de-8d13-0010c6dffd0f",
+]
+NEEDED = {"Add Patients"}
+NICE_TO_HAVE = {
+    "Add People",
+    "Add Patient Identifiers",
+    "Edit Patient Identifiers",
+}
+BLOCKED_PRIVS = NEEDED | NICE_TO_HAVE
+
+def fetch_role(role_uuid: str) -> dict:
+    r = requests.get(
+        f"{BASE_URL}/role/{role_uuid}",
+        params={"v": "full"},
+        headers={"Accept": "application/json"},
+        auth=auth,
+        timeout=30,
+    )
+    r.raise_for_status()
+    return r.json()
+
+if __name__ == "__main__":
+    print("Roles WITHOUT any patient-creation privileges:\n")
+
+    for role_uuid in ROLE_UUIDS:
+        data = fetch_role(role_uuid)
+
+        role_name = data.get("display") or data.get("name") or role_uuid
+        privileges = {
+            p.get("display")
+            for p in data.get("privileges", [])
+            if p.get("display")
+        }
+
+        if privileges.isdisjoint(BLOCKED_PRIVS):
+            print(f"- {role_name} ({role_uuid})")
+
+#====================================================================================================
+# FILE: script.py
+#====================================================================================================
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
+from typing import Iterable
+
+
+DEFAULT_EXCLUDE_DIRS = {
+    ".git",
+    ".hg",
+    ".svn",
+    ".idea",
+    ".vscode",
+    "__pycache__",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    ".tox",
+    ".nox",
+    "venv",
+    ".venv",
+    "env",
+    ".env",
+    "build",
+    "dist",
+    ".eggs",
+    ".cache",
+}
+
+DEFAULT_EXCLUDE_FILE_SUFFIXES = {
+    ".pyc",
+    ".pyo",
+}
+
+
+def is_under_any_dir(path: Path, dirnames: set[str]) -> bool:
+    parts = set(path.parts)
+    return any(d in parts for d in dirnames)
+
+
+def should_skip_file(
+    file_path: Path,
+    project_root: Path,
+    exclude_dirs: set[str],
+    include_tests: bool,
+) -> bool:
+    rel = file_path.relative_to(project_root)
+
+    # Exclude directories by name anywhere in the path
+    if is_under_any_dir(rel, exclude_dirs):
+        return True
+
+    # Must be .py
+    if file_path.suffix != ".py":
+        return True
+
+    # Exclude typical compiled suffixes (just in case)
+    if file_path.suffix in DEFAULT_EXCLUDE_FILE_SUFFIXES:
+        return True
+
+    # Optionally exclude tests
+    name = file_path.name
+    if not include_tests:
+        if name.startswith("test_") and name.endswith(".py"):
+            return True
+        if name.endswith("_test.py"):
+            return True
+        if rel.parts and rel.parts[0] in {"tests", "test"}:
+            return True
+
+    return False
+
+
+def iter_python_modules(
+    project_root: Path,
+    exclude_dirs: set[str],
+    include_tests: bool,
+) -> Iterable[Path]:
+    for p in project_root.rglob("*.py"):
+        if p.is_file() and not should_skip_file(p, project_root, exclude_dirs, include_tests):
+            yield p
+
+
+def read_text_safely(path: Path) -> str:
+    # Try UTF-8 first, then fallback
+    try:
+        return path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        return path.read_text(encoding="utf-8", errors="replace")
+
+
+def build_bundle(
+    project_root: Path,
+    output_file: Path,
+    exclude_dirs: set[str],
+    include_tests: bool,
+) -> tuple[int, int]:
+    files = sorted(iter_python_modules(project_root, exclude_dirs, include_tests))
+    total_bytes = 0
+
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+
+    with output_file.open("w", encoding="utf-8", newline="\n") as out:
+        out.write("# Bundled project sources\n")
+        out.write(f"# Root: {project_root.resolve()}\n")
+        out.write(f"# Files: {len(files)}\n\n")
+
+        for fp in files:
+            rel = fp.relative_to(project_root).as_posix()
+            content = read_text_safely(fp)
+
+            out.write("\n")
+            out.write("#" + "=" * 100 + "\n")
+            out.write(f"# FILE: {rel}\n")
+            out.write("#" + "=" * 100 + "\n\n")
+            out.write(content)
+            if not content.endswith("\n"):
+                out.write("\n")
+
+            total_bytes += len(content.encode("utf-8", errors="replace"))
+
+    return len(files), total_bytes
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Collect all Python modules from a project and write their contents into a single test file."
+    )
+    parser.add_argument(
+        "project_root",
+        nargs="?",
+        default=".",
+        help="Path to project root (default: current directory).",
+    )
+    parser.add_argument(
+        "-o",
+        "--output",
+        default="tests/bundled_project_sources_test.txt",
+        help="Output file path (default: tests/bundled_project_sources_test.txt).",
+    )
+    parser.add_argument(
+        "--include-tests",
+        action="store_true",
+        help="Include test files too (test_*.py, *_test.py, tests/).",
+    )
+    parser.add_argument(
+        "--exclude-dir",
+        action="append",
+        default=[],
+        help="Directory name to exclude (can be used multiple times).",
+    )
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+    project_root = Path(args.project_root).resolve()
+    output_file = Path(args.output).resolve()
+
+    exclude_dirs = set(DEFAULT_EXCLUDE_DIRS) | set(args.exclude_dir)
+
+    if not project_root.exists() or not project_root.is_dir():
+        raise SystemExit(f"Project root does not exist or is not a directory: {project_root}")
+
+    count, total_bytes = build_bundle(
+        project_root=project_root,
+        output_file=output_file,
+        exclude_dirs=exclude_dirs,
+        include_tests=args.include_tests,
+    )
+
+    print(f"OK: bundled {count} files into: {output_file}")
+    print(f"Total UTF-8 bytes (approx): {total_bytes}")
+
+
+if __name__ == "__main__":
+    main()
+
+#====================================================================================================
+# FILE: src/__init__.py
+#====================================================================================================
+
+
+
+#====================================================================================================
+# FILE: src/openmrs_patient.py
+#====================================================================================================
+
+"""
+openmrs_patient.py
+
+Минимальный клиент OpenMRS REST API для integration-тестов.
+BASE_URL зашит в OpenMRSClient.
+"""
+
+from dataclasses import dataclass, asdict
+from typing import Dict, List, Optional
+
+import requests
+from requests.auth import HTTPBasicAuth
+
+
+# -----------------------------
+# dataclasses
+# -----------------------------
+
+@dataclass
+class PersonName:
+    givenName: str
+    familyName: str
+    middleName: Optional[str] = None
+
+
+@dataclass
+class Address:
+    address1: str
+    cityVillage: str
+    country: str
+
+
+@dataclass
+class Person:
+    names: List[PersonName]
+    gender: str
+    birthdate: str
+    addresses: Optional[List[Address]] = None
+
+
+@dataclass
+class Identifier:
+    identifier: str
+    identifierType: str
+    location: str
+    preferred: bool = True
+
+
+@dataclass
+class PatientPayload:
+    person: Person
+    identifiers: List[Identifier]
+
+    def to_dict(self) -> Dict:
+        return asdict(self)
+
+
+# -----------------------------
+# client
+# -----------------------------
+
+class OpenMRSClient:
+    """
+    Простой клиент OpenMRS REST API.
+
+    BASE_URL фиксирован под локальный OpenMRS.
+    """
+
+    BASE_URL = "http://localhost/openmrs/ws/rest/v1"
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+
+
+    def __init__(self, username: str, password: str) -> None:
+        self.auth = HTTPBasicAuth(username, password)
+
+
+    def create_patient(self, payload: PatientPayload) -> Dict:
+        resp = requests.post(
+            f"{self.BASE_URL}/patient",
+            headers=self.headers,
+            json=payload.to_dict(),
+            auth=self.auth,
+        )
+
+        if resp.status_code not in (200, 201):
+            raise RuntimeError(
+                f"OpenMRS error {resp.status_code}: {resp.text}"
+            )
+
+        return resp.json()
+
+#====================================================================================================
+# FILE: user/create_all_users_with_all_roles.py
+#====================================================================================================
+
+import requests
+from requests.auth import HTTPBasicAuth
+
+BASE_URL = "http://localhost/openmrs/ws/rest/v1"
+auth = HTTPBasicAuth("admin", "Admin123")
+
+ROLE_UUIDS = [
+    "246f8412-01fb-4e55-86d7-6441cd1b81a5",
+    "a142aa96-772a-4d09-b80c-b3a78687b189",
+    "d8ddab2c-20a5-4a3c-b209-856c7fe839cd",
+    "7f04f24c-e433-4bc7-95cd-975b6f003207",
+    "66fa1ec4-5d30-4127-a693-d8b1f9519a14",
+    "9873dba9-484f-42c2-a98d-f224bd65117a",
+    "dc978fe8-b574-4e11-be54-626ae2d28ed8",
+    "eba658df-fa88-4dab-b000-57e1e5cb2e43",
+    "fb393086-d6ec-4bcb-a300-5815a554c4ae",
+    "2d09a0e2-240a-4dd7-9c3e-9e2cd2cb2d1f",
+    "58f60da3-03bd-4b57-bb3c-429b50f6939b",
+    "564b560e-3fe8-4829-8be4-68ddb40cf106",
+    "93a9c2f8-9296-488f-9451-43667e1c4d7f",
+    "f7fd42ef-880e-40c5-972d-e4ae7c990de2",
+    "2083fd40-3391-11ed-a667-507b9dea1806",
+    "d210eb66-2188-11ed-9dff-507b9dea1806",
+    "84bdd876-4694-11ed-8109-00155dcc3fc0",
+    "cca4be4b-2188-11ed-9dff-507b9dea1806",
+    "8ee2f2ac-467f-11ed-8109-00155dcc3fc0",
+    "a49be648-6b0a-11ed-93a2-806d973f13a9",
+    "4ef1f0f9-fee6-414b-910d-28e17df345c2",
+    "2749cd1b-251a-4d8b-bc35-0165f2b1af3e",
+    "fab43ac4-79bc-4f3d-805b-bd3a82ce41e9",
+    "2f087f90-9c47-4262-bfce-23c7862e727e",
+    "ab2160f6-0941-430c-9752-6714353fbd3c",
+    "f089471c-e00b-468e-96e8-46aea1b339af",
+    "8d94f280-c2cc-11de-8d13-0010c6dffd0f",
+    "7d8d214d-2188-11ed-9dff-507b9dea1806",
+    "8d94f852-c2cc-11de-8d13-0010c6dffd0f",
+]
+
+START_USER = 200  # user100
+
+
+def create_user(user_number: int, role_uuid: str):
+    payload = {
+        "username": f"user{user_number}",
+        "password": "Password123",
+        "systemId": str(user_number),
+        "person": {
+            "names": [{"givenName": f"Demo{user_number}", "familyName": "User"}],
+            "gender": "M",
+            "birthdate": "1997-09-02",
+        },
+        # ✅ РОВНО ОДНА РОЛЬ на пользователя
+        "roles": [{"uuid": role_uuid}],
+    }
+
+    r = requests.post(
+        f"{BASE_URL}/user",
+        json=payload,
+        headers={"Accept": "application/json", "Content-Type": "application/json"},
+        auth=auth,
+        timeout=30,
+    )
+
+    print(f"user{user_number} (role {role_uuid}) -> status {r.status_code}")
+    if r.status_code == 409:
+        print("User already exists, skipping.\n")
+        return
+
+    print(r.text)
+    r.raise_for_status()
+    print()
+
+
+if __name__ == "__main__":
+    for i, role_uuid in enumerate(ROLE_UUIDS):
+        user_number = START_USER + i
+        create_user(user_number, role_uuid)
+
+#====================================================================================================
+# FILE: user/delete_user.py
+#====================================================================================================
+
+import requests
+from requests.auth import HTTPBasicAuth
+
+BASE_URL = "http://localhost/openmrs/ws/rest/v1"
+auth = HTTPBasicAuth("admin", "Admin123")
+
+HEADERS = {
+    "Accept": "application/json",
+    "Content-Type": "application/json",
+}
+
+
+def get_user_uuid(username: str) -> str | None:
+    """Получить UUID пользователя по username"""
+    r = requests.get(
+        f"{BASE_URL}/user",
+        params={"q": username},
+        headers=HEADERS,
+        auth=auth,
+        timeout=30,
+    )
+    r.raise_for_status()
+
+    results = r.json().get("results", [])
+    if not results:
+        return None
+
+    return results[0]["uuid"]
+
+
+def delete_user(username: str):
+    user_uuid = get_user_uuid(username)
+
+    if not user_uuid:
+        print(f"❌ User '{username}' not found")
+        return
+
+    r = requests.delete(
+        f"{BASE_URL}/user/{user_uuid}",
+        headers=HEADERS,
+        auth=auth,
+        timeout=30,
+    )
+
+    if r.status_code in (200, 204):
+        print(f"✅ User '{username}' deleted")
+    else:
+        print(f"⚠️ Failed to delete '{username}': {r.status_code}")
+        print(r.text)
+
+
+if __name__ == "__main__":
+    delete_user("user11")
+
+#====================================================================================================
+# FILE: user/get_active_users.py
+#====================================================================================================
+
+import requests
+from requests.auth import HTTPBasicAuth
+
+BASE_URL = "http://localhost/openmrs/ws/rest/v1"
+USERNAME = "admin"
+PASSWORD = "Admin123"
+
+
+def get_active_users():
+    url = f"{BASE_URL}/user"
+    params = {
+        "retired": "false",
+        "v": "full",   # роли и привилегии есть только тут
+        "limit": 100,
+    }
+
+    r = requests.get(
+        url,
+        params=params,
+        auth=HTTPBasicAuth(USERNAME, PASSWORD),
+        headers={"Accept": "application/json"},
+        timeout=10,
+    )
+
+    if not r.ok:
+        print("HTTP:", r.status_code)
+        print("URL :", r.url)
+        print("BODY:", (r.text or "")[:2000])
+        r.raise_for_status()
+
+    return r.json().get("results", [])
+
+
+def extract_roles(user):
+    roles = user.get("roles", [])
+    return ", ".join(
+        role.get("display", role.get("name", "-")) for role in roles
+    ) or "-"
+
+
+def extract_privileges(user):
+    privileges = set()
+
+    for role in user.get("roles", []):
+        for priv in role.get("privileges", []):
+            name = priv.get("display") or priv.get("name")
+            if name:
+                privileges.add(name)
+
+    return ", ".join(sorted(privileges)) or "-"
+
+
+def print_table(users):
+    headers = ["Username", "Person", "Roles", "Privileges", "UUID", "Retired"]
+    rows = []
+
+    for user in users:
+        person = user.get("person") or {}
+        rows.append([
+            user.get("username", "-"),
+            person.get("display", "-"),
+            extract_roles(user),
+            extract_privileges(user),
+            user.get("uuid", "-"),
+            str(user.get("retired", "-")),
+        ])
+
+    col_widths = [
+        max(len(str(row[i])) for row in ([headers] + rows))
+        for i in range(len(headers))
+    ]
+
+    def format_row(row):
+        return " | ".join(
+            str(cell).ljust(col_widths[i]) for i, cell in enumerate(row)
+        )
+
+    separator = "-+-".join("-" * w for w in col_widths)
+
+    print(f"\nАктивные пользователи: {len(rows)}\n")
+    print(format_row(headers))
+    print(separator)
+
+    for row in rows:
+        print(format_row(row))
+
+
+if __name__ == "__main__":
+    users = get_active_users()
+    print_table(users)
+
+#====================================================================================================
+# FILE: user/get_retied_user_with_add_patient.py
+#====================================================================================================
+
+import requests
+from requests.auth import HTTPBasicAuth
+
+#TODO: не работает - во
+BASE_URL = "http://localhost/openmrs/ws/rest/v1"
+USERNAME = "admin"
+PASSWORD = "Admin123"
+
+TARGET_PRIVILEGE = "Add Patients"
+
+
+def get_retired_users(limit=100):
+    url = f"{BASE_URL}/user"
+    params = {
+        "retired": "true",
+        "v": "full",
+        "limit": limit,
+    }
+
+    r = requests.get(
+        url,
+        params=params,
+        auth=HTTPBasicAuth(USERNAME, PASSWORD),
+        headers={"Accept": "application/json"},
+        timeout=10,
+    )
+
+    if not r.ok:
+        print("HTTP:", r.status_code)
+        print("URL :", r.url)
+        print("BODY:", (r.text or "")[:2000])
+        r.raise_for_status()
+
+    return r.json().get("results", [])
+
+
+def privilege_name(priv: dict) -> str:
+    return priv.get("display") or priv.get("name") or ""
+
+
+def role_name(role: dict) -> str:
+    return role.get("display") or role.get("name") or "-"
+
+
+def has_privilege(user: dict, target_priv: str) -> bool:
+    for role in user.get("roles", []):
+        for priv in role.get("privileges", []):
+            if privilege_name(priv) == target_priv:
+                return True
+    return False
+
+
+def roles_granting_privilege(user: dict, target_priv: str) -> str:
+    granting = []
+    for role in user.get("roles", []):
+        role_privs = {
+            privilege_name(p)
+            for p in role.get("privileges", [])
+            if privilege_name(p)
+        }
+        if target_priv in role_privs:
+            granting.append(role_name(role))
+    return ", ".join(granting) or "-"
+
+
+def print_table(users):
+    headers = ["Username", "Person", "Roles", "Granting roles", "User UUID", "Retired"]
+    rows = []
+
+    for user in users:
+        if not has_privilege(user, TARGET_PRIVILEGE):
+            continue
+
+        person = user.get("person") or {}
+        roles = ", ".join(role_name(r) for r in user.get("roles", [])) or "-"
+
+        rows.append([
+            user.get("username", "-"),
+            person.get("display", "-"),
+            roles,
+            roles_granting_privilege(user, TARGET_PRIVILEGE),
+            user.get("uuid", "-"),      # ← ЯВНО user UUID
+            str(user.get("retired", "-")),
+        ])
+
+    if not rows:
+        print(f"\nRetired пользователей с привилегией '{TARGET_PRIVILEGE}' не найдено.\n")
+        return
+
+    col_widths = [
+        max(len(str(row[i])) for row in ([headers] + rows))
+        for i in range(len(headers))
+    ]
+
+    def format_row(row):
+        return " | ".join(str(cell).ljust(col_widths[i]) for i, cell in enumerate(row))
+
+    separator = "-+-".join("-" * w for w in col_widths)
+
+    print(f"\nRetired пользователи С привилегией '{TARGET_PRIVILEGE}': {len(rows)}\n")
+    print(format_row(headers))
+    print(separator)
+
+    for row in rows:
+        print(format_row(row))
+
+
+if __name__ == "__main__":
+    users = get_retired_users(limit=100)
+    print_table(users)
+
+#====================================================================================================
+# FILE: user/get_retiered_users.py
+#====================================================================================================
+
+import requests
+from requests.auth import HTTPBasicAuth
+
+BASE_URL = "http://localhost/openmrs/ws/rest/v1"
+USERNAME = "admin"
+PASSWORD = "Admin123"
+
+
+def get_active_users():
+    url = f"{BASE_URL}/user"
+    params = {
+        "retired": "true",
+        "v": "full",   # роли и привилегии есть только тут
+        "limit": 100,
+    }
+
+    r = requests.get(
+        url,
+        params=params,
+        auth=HTTPBasicAuth(USERNAME, PASSWORD),
+        headers={"Accept": "application/json"},
+        timeout=10,
+    )
+
+    if not r.ok:
+        print("HTTP:", r.status_code)
+        print("URL :", r.url)
+        print("BODY:", (r.text or "")[:2000])
+        r.raise_for_status()
+
+    return r.json().get("results", [])
+
+
+def extract_roles(user):
+    roles = user.get("roles", [])
+    return ", ".join(
+        role.get("display", role.get("name", "-")) for role in roles
+    ) or "-"
+
+
+def extract_privileges(user):
+    privileges = set()
+
+    for role in user.get("roles", []):
+        for priv in role.get("privileges", []):
+            name = priv.get("display") or priv.get("name")
+            if name:
+                privileges.add(name)
+
+    return ", ".join(sorted(privileges)) or "-"
+
+
+def print_table(users):
+    headers = ["Username", "Person", "Roles", "Privileges", "UUID", "Retired"]
+    rows = []
+
+    for user in users:
+        person = user.get("person") or {}
+        rows.append([
+            user.get("username", "-"),
+            person.get("display", "-"),
+            extract_roles(user),
+            extract_privileges(user),
+            user.get("uuid", "-"),
+            str(user.get("retired", "-")),
+        ])
+
+    col_widths = [
+        max(len(str(row[i])) for row in ([headers] + rows))
+        for i in range(len(headers))
+    ]
+
+    def format_row(row):
+        return " | ".join(
+            str(cell).ljust(col_widths[i]) for i, cell in enumerate(row)
+        )
+
+    separator = "-+-".join("-" * w for w in col_widths)
+
+    print(f"\nАктивные пользователи: {len(rows)}\n")
+    print(format_row(headers))
+    print(separator)
+
+    for row in rows:
+        print(format_row(row))
+
+
+if __name__ == "__main__":
+    users = get_active_users()
+    print_table(users)
+
+#====================================================================================================
+# FILE: user/get_user_by_name.py
+#====================================================================================================
+
+import json
+import requests
+from requests.auth import HTTPBasicAuth
+
+BASE_URL = "http://localhost/openmrs/ws/rest/v1"
+API_USERNAME = "admin"
+API_PASSWORD = "Admin123"
+
+# 👇 просто меняешь здесь
+TARGET_USERNAME = "doctor"
+
+
+def get_user_by_username(username: str) -> dict:
+    """
+    GET /user/{username}?v=full
+    Возвращает полный объект пользователя.
+    """
+    url = f"{BASE_URL}/user/{username}"
+    params = {"v": "full"}
+
+    r = requests.get(
+        url,
+        params=params,
+        auth=HTTPBasicAuth(API_USERNAME, API_PASSWORD),
+        headers={"Accept": "application/json"},
+        timeout=15,
+    )
+
+    if r.status_code == 404:
+        raise ValueError(f"Пользователь '{username}' не найден")
+
+    if not r.ok:
+        print("HTTP:", r.status_code)
+        print("URL :", r.url)
+        print("BODY:", (r.text or "")[:4000])
+        r.raise_for_status()
+
+    return r.json()
+
+
+if __name__ == "__main__":
+    user_data = get_user_by_username(TARGET_USERNAME)
+
+    # красивый вывод ВСЕЙ информации о пользователе
+    print(json.dumps(user_data, ensure_ascii=False, indent=2))
+
+#====================================================================================================
+# FILE: user/get_user_by_uuid.py
+#====================================================================================================
+
+import json
+import requests
+from requests.auth import HTTPBasicAuth
+
+BASE_URL = "http://localhost/openmrs/ws/rest/v1"
+API_USERNAME = "admin"
+API_PASSWORD = "Admin123"
+
+# 👇 просто меняешь здесь
+USER_UUID = "45ce6c2e-dd5a-11e6-9d9c-0242ac150002"
+
+
+def get_user(user_uuid: str) -> dict:
+    """
+    GET /user/{uuid}?v=full
+    Возвращает весь JSON пользователя (full representation).
+    """
+    url = f"{BASE_URL}/user/{user_uuid}"
+    params = {"v": "full"}
+
+    r = requests.get(
+        url,
+        params=params,
+        auth=HTTPBasicAuth(API_USERNAME, API_PASSWORD),
+        headers={"Accept": "application/json"},
+        timeout=15,
+    )
+
+    if not r.ok:
+        print("HTTP:", r.status_code)
+        print("URL :", r.url)
+        print("BODY:", (r.text or "")[:4000])
+        r.raise_for_status()
+
+    return r.json()
+
+
+if __name__ == "__main__":
+    user_data = get_user(USER_UUID)
+
+    # красивый вывод всего объекта user
+    print(json.dumps(user_data, ensure_ascii=False, indent=2))
+
+#====================================================================================================
+# FILE: user/get_user_with_add_patient.py
+#====================================================================================================
+
+import requests
+from requests.auth import HTTPBasicAuth
+
+BASE_URL = "http://localhost/openmrs/ws/rest/v1"
+USERNAME = "admin"
+PASSWORD = "Admin123"
+
+TARGET_PRIVILEGE = "Add Patients"
+SHOW_ALL_PRIVILEGES = False
+
+
+def get_json(url, *, params=None, timeout=10):
+    r = requests.get(
+        url,
+        params=params,
+        auth=HTTPBasicAuth(USERNAME, PASSWORD),
+        headers={"Accept": "application/json"},
+        timeout=timeout,
+    )
+    if not r.ok:
+        print("HTTP:", r.status_code)
+        print("URL :", r.url)
+        print("BODY:", (r.text or "")[:2000])
+        r.raise_for_status()
+    return r.json()
+
+
+def get_active_users(limit=100):
+    url = f"{BASE_URL}/user"
+    params = {"retired": "false", "v": "full", "limit": limit}
+    return get_json(url, params=params).get("results", [])
+
+
+def get_current_session_location_display() -> str:
+    """
+    Возвращает локацию ТЕКУЩЕЙ сессии (то, что выбирают при логине в RefApp),
+    если установлен модуль appui.
+    """
+    # Обрати внимание: appui - это НЕ под BASE_URL (/ws/rest/v1), но в том же REST-префиксе.
+    url = BASE_URL.replace("/ws/rest/v1", "/ws/rest/v1/appui/session")
+    data = get_json(url, params={"v": "full"})
+
+    # Обычно структура содержит 'sessionLocation' (объект location) или похожее поле.
+    loc = data.get("sessionLocation") or data.get("location") or {}
+    if isinstance(loc, dict):
+        return loc.get("display") or loc.get("name") or loc.get("uuid") or "-"
+    return str(loc) if loc else "-"
+
+
+def role_name(role: dict) -> str:
+    return role.get("display") or role.get("name") or "-"
+
+
+def privilege_name(priv: dict) -> str:
+    return priv.get("display") or priv.get("name") or ""
+
+
+def extract_roles(user: dict) -> str:
+    return ", ".join(role_name(r) for r in user.get("roles", [])) or "-"
+
+
+def extract_privileges_set(user: dict) -> set[str]:
+    privs = set()
+    for role in user.get("roles", []):
+        for priv in role.get("privileges", []):
+            name = privilege_name(priv)
+            if name:
+                privs.add(name)
+    return privs
+
+
+def roles_granting_privilege(user: dict, target_priv: str) -> str:
+    granting = []
+    for role in user.get("roles", []):
+        role_privs = {privilege_name(p) for p in role.get("privileges", []) if privilege_name(p)}
+        if target_priv in role_privs:
+            granting.append(role_name(role))
+    return ", ".join(granting) or "-"
+
+
+def has_privilege(user: dict, target_priv: str) -> bool:
+    return target_priv in extract_privileges_set(user)
+
+
+def filter_users_with_privilege(users: list[dict], target_priv: str) -> list[dict]:
+    return [u for u in users if has_privilege(u, target_priv)]
+
+
+def print_table(users: list[dict], target_priv: str, session_location: str):
+    if SHOW_ALL_PRIVILEGES:
+        headers = ["Username", "Person", "Roles", "Granting roles", "Privileges", "User UUID"]
+    else:
+        headers = ["Username", "Person", "Roles", "Granting roles", "Priv count", "User UUID"]
+
+    rows = []
+    for user in users:
+        person = user.get("person") or {}
+        privs = sorted(extract_privileges_set(user))
+        granting = roles_granting_privilege(user, target_priv)
+
+        rows.append([
+            user.get("username", "-"),
+            person.get("display", "-"),
+            extract_roles(user),
+            granting,
+            ", ".join(privs) if SHOW_ALL_PRIVILEGES else str(len(privs)),
+            user.get("uuid", "-"),
+        ])
+
+    print(f"\nSession Location (для текущих кредов): {session_location}\n")
+
+    if not rows:
+        print(f"Пользователей с привилегией '{target_priv}' не найдено.\n")
+        return
+
+    col_widths = [max(len(str(row[i])) for row in ([headers] + rows)) for i in range(len(headers))]
+
+    def format_row(row):
+        return " | ".join(str(cell).ljust(col_widths[i]) for i, cell in enumerate(row))
+
+    separator = "-+-".join("-" * w for w in col_widths)
+
+    print(f"Пользователи с привилегией '{target_priv}': {len(rows)}\n")
+    print(format_row(headers))
+    print(separator)
+    for row in rows:
+        print(format_row(row))
+
+
+if __name__ == "__main__":
+    session_loc = "-"
+    try:
+        session_loc = get_current_session_location_display()
+    except requests.HTTPError:
+        # если appui не установлен или запрещён доступ — просто покажем "-"
+        session_loc = "-"
+
+    users = get_active_users(limit=100)
+    filtered = filter_users_with_privilege(users, TARGET_PRIVILEGE)
+    print_table(filtered, TARGET_PRIVILEGE, session_loc)
+
+#====================================================================================================
+# FILE: user/get_user_without_add_patient.py
+#====================================================================================================
+
+import requests
+from requests.auth import HTTPBasicAuth
+
+BASE_URL = "http://localhost/openmrs/ws/rest/v1"
+USERNAME = "admin"
+PASSWORD = "Admin123"
+
+MISSING_PRIVILEGE = "Add Users"
+SHOW_ALL_PRIVILEGES = False
+
+
+def get_active_users(limit=100):
+    url = f"{BASE_URL}/user"
+    params = {
+        "retired": "false",
+        "v": "full",
+        "limit": limit,
+    }
+
+    r = requests.get(
+        url,
+        params=params,
+        auth=HTTPBasicAuth(USERNAME, PASSWORD),
+        headers={"Accept": "application/json"},
+        timeout=10,
+    )
+
+    if not r.ok:
+        print("HTTP:", r.status_code)
+        print("URL :", r.url)
+        print("BODY:", (r.text or "")[:2000])
+        r.raise_for_status()
+
+    return r.json().get("results", [])
+
+
+def role_name(role: dict) -> str:
+    return role.get("display") or role.get("name") or "-"
+
+
+def privilege_name(priv: dict) -> str:
+    return priv.get("display") or priv.get("name") or ""
+
+
+def extract_roles(user: dict) -> str:
+    return ", ".join(role_name(r) for r in user.get("roles", [])) or "-"
+
+
+def extract_privileges_set(user: dict) -> set[str]:
+    privs = set()
+    for role in user.get("roles", []):
+        for priv in role.get("privileges", []):
+            name = privilege_name(priv)
+            if name:
+                privs.add(name)
+    return privs
+
+
+def roles_granting_privilege(user: dict, target_priv: str) -> str:
+    granting = []
+    for role in user.get("roles", []):
+        role_privs = {privilege_name(p) for p in role.get("privileges", []) if privilege_name(p)}
+        if target_priv in role_privs:
+            granting.append(role_name(role))
+    return ", ".join(granting) or "-"
+
+
+def lacks_privilege(user: dict, missing_priv: str) -> bool:
+    return missing_priv not in extract_privileges_set(user)
+
+
+def filter_users_without_privilege(users: list[dict], missing_priv: str) -> list[dict]:
+    return [u for u in users if lacks_privilege(u, missing_priv)]
+
+
+def print_table(users: list[dict], missing_priv: str):
+    if SHOW_ALL_PRIVILEGES:
+        headers = ["Username", "Person", "Roles", "Has privilege via roles", "Privileges", "User UUID"]
+    else:
+        headers = ["Username", "Person", "Roles", "Has privilege via roles", "Priv count", "User UUID"]
+
+    rows = []
+    for user in users:
+        person = user.get("person") or {}
+        privs = sorted(extract_privileges_set(user))
+        granting = roles_granting_privilege(user, missing_priv)
+
+        rows.append([
+            user.get("username", "-"),
+            person.get("display", "-"),
+            extract_roles(user),
+            granting if granting != "-" else "❌ none",
+            ", ".join(privs) if SHOW_ALL_PRIVILEGES else str(len(privs)),
+            user.get("uuid", "-"),   # ← ЯВНО user UUID
+        ])
+
+    if not rows:
+        print(f"\nВсе пользователи имеют привилегию '{missing_priv}'.\n")
+        return
+
+    col_widths = [
+        max(len(str(row[i])) for row in ([headers] + rows))
+        for i in range(len(headers))
+    ]
+
+    def format_row(row):
+        return " | ".join(str(cell).ljust(col_widths[i]) for i, cell in enumerate(row))
+
+    separator = "-+-".join("-" * w for w in col_widths)
+
+    print(f"\nПользователи БЕЗ привилегии '{missing_priv}': {len(rows)}\n")
+    print(format_row(headers))
+    print(separator)
+    for row in rows:
+        print(format_row(row))
+
+
+if __name__ == "__main__":
+    users = get_active_users(limit=100)
+    filtered = filter_users_without_privilege(users, MISSING_PRIVILEGE)
+    print_table(filtered, MISSING_PRIVILEGE)
+
+#====================================================================================================
+# FILE: user/make_user_retired.py
+#====================================================================================================
+
+import requests
+
+BASE_URL = "http://localhost/openmrs/ws/rest/v1"
+AUTH = ("admin", "Admin123")
+
+USERNAME_TO_RETIRE = "user224"
+user_uuid = '288cd575-1134-46d5-aa1b-2e11d79ca13f'
+REASON = "No longer active"
+#user224  | Demo224 User | Privilege Level: Full | Privilege Level: Full | 288cd575-1134-46d5-aa1b-2e11d79ca13f | False
+
+# найти uuid по username
+r = requests.get(f"{BASE_URL}/user", auth=AUTH, params={"q": USERNAME_TO_RETIRE})
+r.raise_for_status()
+results = r.json().get("results", [])
+if not results:
+    raise RuntimeError(f"User '{USERNAME_TO_RETIRE}' not found")
+user_uuid = results[0]["uuid"]
+
+print("uuid:", user_uuid)
+
+# retire через DELETE + reason
+r = requests.delete(
+    f"{BASE_URL}/user/{user_uuid}",
+    auth=AUTH,
+    params={"reason": REASON},
+    headers={"Accept": "application/json"},
+)
+
+print("status:", r.status_code)
+print(r.text)
+r.raise_for_status()
