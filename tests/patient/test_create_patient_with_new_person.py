@@ -22,6 +22,8 @@ PASSWORD = "Admin123"
 # ============================================================
 
 def build_valid_person_dict() -> dict:
+    # Сценарий: формируем валидный объект Person для вложенного создания (POST /patient).
+    # Ожидаемый результат: возвращается словарь person с обязательными полями names/gender/birthdate.
     return {
         "names": [
             {
@@ -37,6 +39,8 @@ def build_valid_person_dict() -> dict:
 
 
 def build_valid_patient_payload_dict() -> dict:
+    # Сценарий: формируем валидный payload для POST /patient (создаём и patient, и person вместе).
+    # Ожидаемый результат: payload содержит корректные person + identifiers (с валидными type/value/location).
     location_uuid = get_random_valid_location()["uuid"]
     identifier_type_uuid, identifier_value = get_openmrs_id_identifier()
 
@@ -54,6 +58,8 @@ def build_valid_patient_payload_dict() -> dict:
 
 
 def post_patient(payload: dict) -> requests.Response:
+    # Сценарий: отправляем POST /patient с указанным payload.
+    # Ожидаемый результат: получаем Response от OpenMRS (успех или ошибка валидации).
     return requests.post(
         f"{BASE_URL}/patient",
         json=payload,
@@ -67,22 +73,44 @@ def post_patient(payload: dict) -> requests.Response:
 
 
 # ============================================================
-# 1) person root validation
+# Create new person validation
 # ============================================================
 
 @pytest.mark.parametrize(
     "person_value, description",
     [
+        # Сценарий: поле person отсутствует в payload (ключ удалён).
+        # Ожидаемый результат: OpenMRS отклоняет запрос (HTTP 400) или падает с 500 (если нет корректной валидации).
         ("__MISSING__", "person key missing"),
+
+        # Сценарий: поле person передано как null.
+        # Ожидаемый результат: HTTP 400 или 500, в тексте ошибки есть person/null.
         (None, "person is null"),
+
+        # Сценарий: поле person передано пустой строкой (не объект).
+        # Ожидаемый результат: HTTP 400 или 500.
         ("", "person is empty string"),
+
+        # Сценарий: поле person передано строкой (например uuid-like), но мы ожидаем объект person при одновременном создании.
+        # Ожидаемый результат: HTTP 400 или 500.
         ("uuid-like-string", "person is string instead of object"),
+
+        # Сценарий: поле person передано числом (неверный тип).
+        # Ожидаемый результат: HTTP 400 или 500.
         (123, "person is int"),
+
+        # Сценарий: поле person передано списком (неверный тип).
+        # Ожидаемый результат: HTTP 400 или 500.
         ([], "person is list"),
+
+        # Сценарий: поле person передано пустым объектом (нет обязательных полей).
+        # Ожидаемый результат: HTTP 400 или 500.
         ({}, "person is empty object"),
     ],
 )
 def test_create_patient_with_invalid_person_root(person_value, description):
+    # Сценарий: берём валидный payload и портим поле person одним из вариантов выше.
+    # Ожидаемый результат: OpenMRS не создаёт пациента (ошибка валидации).
     payload = build_valid_patient_payload_dict()
 
     if person_value == "__MISSING__":
@@ -92,7 +120,7 @@ def test_create_patient_with_invalid_person_root(person_value, description):
 
     response = post_patient(payload)
 
-    assert response.status_code in (400,500), (
+    assert response.status_code in (400, 500), (
         f"{description}\n"
         f"Response body: {(response.text or '')[:2000]}"
     )
@@ -106,17 +134,42 @@ def test_create_patient_with_invalid_person_root(person_value, description):
 @pytest.mark.parametrize(
     "invalid_names",
     [
-        None,                               # null - негативный
-        "",                                 # wrong type - негативный
-        {},                                 # wrong type - негативный
-        [],                                 # empty list - негативный
-        [{"familyName": "X"}],              # missing givenName - негативный
-        [{"givenName": "", "familyName": "X"}],     # blank givenName - негативный
-        [{"givenName": "   ", "familyName": "X"}],  # whitespace givenName
-        [123],                              # element wrong type
+        # Сценарий: person.names = null.
+        # Ожидаемый результат: HTTP 400 (валидация обязательного списка имён).
+        None,
+
+        # Сценарий: person.names = "" (неверный тип).
+        # Ожидаемый результат: HTTP 400.
+        "",
+
+        # Сценарий: person.names = {} (неверный тип — объект вместо списка).
+        # Ожидаемый результат: HTTP 400.
+        {},
+
+        # Сценарий: person.names = [] (пустой список имён).
+        # Ожидаемый результат: HTTP 400.
+        [],
+
+        # Сценарий: в names[0] отсутствует givenName.
+        # Ожидаемый результат: HTTP 400 (givenName обязателен).
+        [{"familyName": "X"}],
+
+        # Сценарий: givenName пустая строка.
+        # Ожидаемый результат: HTTP 400.
+        [{"givenName": "", "familyName": "X"}],
+
+        # Сценарий: givenName состоит из пробелов.
+        # Ожидаемый результат: HTTP 400.
+        [{"givenName": "   ", "familyName": "X"}],
+
+        # Сценарий: элемент списка names не объект (неверный тип).
+        # Ожидаемый результат: HTTP 400.
+        [123],
     ],
 )
 def test_create_patient_with_invalid_person_names(invalid_names):
+    # Сценарий: создаём валидный payload и подставляем невалидный person.names.
+    # Ожидаемый результат: OpenMRS отклоняет запрос → HTTP 400.
     payload = build_valid_patient_payload_dict()
     payload["person"]["names"] = invalid_names
 
@@ -131,6 +184,7 @@ def test_create_patient_with_invalid_person_names(invalid_names):
         for key in ["name", "names", "person"]
     )
 
+
 # ============================================================
 # 2b) person.names позитивные кейсы (familyName допускается пустым/отсутствующим)
 # ============================================================
@@ -138,15 +192,26 @@ def test_create_patient_with_invalid_person_names(invalid_names):
 @pytest.mark.parametrize(
     "names_payload",
     [
-        [{"givenName": "X"}],                         # missing familyName - позитивный кейс (по вашему ожиданию)
-        [{"givenName": "X", "familyName": ""}],       # blank familyName - позитивный кейс
-        [{"givenName": "X", "familyName": "   "}],    # whitespace familyName - позитивный кейс
+        # Сценарий: указан только givenName, familyName отсутствует.
+        # Ожидаемый результат: пациент создаётся успешно (HTTP 200/201),
+        # так как в вашей системе familyName считается необязательным.
+        [{"givenName": "X"}],
+
+        # Сценарий: familyName задан пустой строкой.
+        # Ожидаемый результат: пациент создаётся успешно (HTTP 200/201),
+        # так как система не валидирует familyName как обязательный/непустой.
+        [{"givenName": "X", "familyName": ""}],
+
+        # Сценарий: familyName состоит из пробелов.
+        # Ожидаемый результат: пациент создаётся успешно (HTTP 200/201),
+        # так как система допускает blank/whitespace familyName.
+        [{"givenName": "X", "familyName": "   "}],
     ],
 )
 def test_create_patient_with_person_names_familyname_optional_positive(names_payload):
+    # Сценарий: подменяем person.names на “позитивный” кейс, где familyName не обязателен.
+    # Ожидаемый результат: успешное создание пациента.
     payload = build_valid_patient_payload_dict()
-
-    # подменяем names на кейс
     payload["person"]["names"] = names_payload
 
     response = post_patient(payload)
@@ -156,29 +221,49 @@ def test_create_patient_with_person_names_familyname_optional_positive(names_pay
         f"Response body: {(response.text or '')[:2000]}"
     )
 
-    # минимальные проверки структуры ответа (без привязки к твоим checks)
-    assert isinstance(response.json(), dict)
+    # Ожидаемый результат: в ответе есть базовая структура Patient.
     data = response.json()
+    assert isinstance(data, dict)
     assert "uuid" in data and isinstance(data["uuid"], str)
     assert data.get("voided") is False
     assert isinstance(data.get("person"), dict)
 
+
 # ============================================================
-# 3) person.gender validation
+# 3) person.gender validation (type/empty)
 # ============================================================
 
 @pytest.mark.parametrize(
     "invalid_gender",
     [
+        # Сценарий: gender = null.
+        # Ожидаемый результат: HTTP 400 (обязательное поле).
         None,
+
+        # Сценарий: gender = "" (пустая строка).
+        # Ожидаемый результат: HTTP 400.
         "",
+
+        # Сценарий: gender = "   " (пробелы).
+        # Ожидаемый результат: HTTP 400.
         "   ",
-        123,        # wrong type
-        [],         # wrong type
-        {},         # wrong type
+
+        # Сценарий: gender неверного типа (число).
+        # Ожидаемый результат: HTTP 400.
+        123,
+
+        # Сценарий: gender неверного типа (list).
+        # Ожидаемый результат: HTTP 400.
+        [],
+
+        # Сценарий: gender неверного типа (dict).
+        # Ожидаемый результат: HTTP 400.
+        {},
     ],
 )
 def test_create_patient_with_invalid_gender(invalid_gender):
+    # Сценарий: подставляем невалидный gender (пусто/неверный тип).
+    # Ожидаемый результат: OpenMRS отклоняет запрос → HTTP 400.
     payload = build_valid_patient_payload_dict()
     payload["person"]["gender"] = invalid_gender
 
@@ -194,15 +279,27 @@ def test_create_patient_with_invalid_gender(invalid_gender):
     )
 
 
-#TODO: it works but shouldn't
+# ============================================================
+# 3b) person.gender custom values — POSITIVE (сейчас работает, но не должно)
+# ============================================================
+
 @pytest.mark.parametrize(
     "gender_value",
     [
-        "X",        # EXPECTED: allowed string value (system does NOT strictly enforce M/F/O/U)
-        "male",     # EXPECTED: allowed string value (system does NOT strictly enforce M/F/O/U)
+        # Сценарий: gender = "X" (нестандартное значение).
+        # Ожидаемый результат: пациент создаётся успешно (HTTP 200/201),
+        # так как в вашей системе gender не валидируется строго по enum M/F/O/U.
+        "X",
+
+        # Сценарий: gender = "male" (нестандартная строка).
+        # Ожидаемый результат: пациент создаётся успешно (HTTP 200/201),
+        # так как в вашей системе gender принимает произвольные строки.
+        "male",
     ],
 )
 def test_create_patient_with_custom_gender_positive(gender_value):
+    # Сценарий: подставляем кастомный gender, который система неожиданно принимает.
+    # Ожидаемый результат: успешное создание пациента.
     payload = build_valid_patient_payload_dict()
     payload["person"]["gender"] = gender_value
 
@@ -213,36 +310,62 @@ def test_create_patient_with_custom_gender_positive(gender_value):
         f"Response body: {(response.text or '')[:2000]}"
     )
 
+    # Ожидаемый результат: в ответе есть базовая структура Patient.
     data = response.json()
     assert isinstance(data, dict)
     assert "uuid" in data and isinstance(data["uuid"], str)
     assert data.get("voided") is False
     assert isinstance(data.get("person"), dict)
 
-    # если сервер возвращает gender в этом же ответе — проверим, что значение сохранилось
-    # (иногда в default representation gender есть, иногда нет — поэтому мягко)
+    # Ожидаемый результат: если gender возвращается в этом представлении — он совпадает с отправленным.
     returned_gender = (data.get("person") or {}).get("gender")
     if returned_gender is not None:
         assert returned_gender == gender_value
 
+
 # ============================================================
-# 4) person.birthdate validation
+# 4) person.birthdate validation — NEGATIVE
 # ============================================================
 
 @pytest.mark.parametrize(
     "invalid_birthdate",
     [
+        # Сценарий: birthdate = "" (пустая строка).
+        # Ожидаемый результат: HTTP 400.
         "",
+
+        # Сценарий: birthdate = "   " (пробелы).
+        # Ожидаемый результат: HTTP 400.
         "   ",
-        "31-12-1990",     # wrong format
+
+        # Сценарий: birthdate в неправильном формате (не ISO YYYY-MM-DD).
+        # Ожидаемый результат: HTTP 400.
+        "31-12-1990",
+
+        # Сценарий: birthdate — не дата.
+        # Ожидаемый результат: HTTP 400.
         "not-a-date",
-        "3000-01-01",     # future date
-        12345,            # wrong type
-        [],               # wrong type
-        {},               # wrong type
+
+        # Сценарий: birthdate в будущем.
+        # Ожидаемый результат: HTTP 400 (обычно запрещено).
+        "3000-01-01",
+
+        # Сценарий: birthdate неверного типа (число).
+        # Ожидаемый результат: HTTP 400.
+        12345,
+
+        # Сценарий: birthdate неверного типа (list).
+        # Ожидаемый результат: HTTP 400.
+        [],
+
+        # Сценарий: birthdate неверного типа (dict).
+        # Ожидаемый результат: HTTP 400.
+        {},
     ],
 )
 def test_create_patient_with_invalid_birthdate(invalid_birthdate):
+    # Сценарий: подставляем невалидный birthdate.
+    # Ожидаемый результат: OpenMRS отклоняет запрос → HTTP 400.
     payload = build_valid_patient_payload_dict()
     payload["person"]["birthdate"] = invalid_birthdate
 
@@ -257,30 +380,31 @@ def test_create_patient_with_invalid_birthdate(invalid_birthdate):
         for key in ["birthdate", "date", "person"]
     )
 
+
 # ============================================================
 # 4b) person.birthdate = null — POSITIVE
 # ============================================================
 
 def test_create_patient_with_null_birthdate_positive():
+    # Сценарий: birthdate передаётся как null.
+    # Ожидаемый результат: пациент создаётся успешно (HTTP 200/201),
+    # так как в вашей системе birthdate допускается неизвестной (null).
     payload = build_valid_patient_payload_dict()
     payload["person"]["birthdate"] = None
 
     response = post_patient(payload)
 
-    # EXPECTED:
-    # - System allows birthdate to be null
-    # - Patient creation succeeds
     assert response.status_code in (200, 201), (
-        f"birthdate=None\n"
+        "birthdate=None\n"
         f"Response body: {(response.text or '')[:2000]}"
     )
 
+    # Ожидаемый результат: в ответе есть базовая структура Patient.
     data = response.json()
     assert isinstance(data, dict)
     assert "uuid" in data and isinstance(data["uuid"], str)
     assert data.get("voided") is False
 
-    # EXPECTED:
-    # - birthdate is either null or omitted in response
+    # Ожидаемый результат: birthdate либо null, либо отсутствует/пустое в ответе (в зависимости от representation).
     returned_birthdate = (data.get("person") or {}).get("birthdate")
     assert returned_birthdate in (None, "")
