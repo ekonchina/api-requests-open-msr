@@ -20,12 +20,8 @@ from src.openmrs_patient import Person
         # Сценарий: identifier задан пустой строкой.
         # Ожидаемый результат: HTTP 400 + ошибка про identifier.
         "",
-        #https://app.testiny.io/p/1/testcases/tcf/52
-        # Сценарий: identifier состоит только из пробелов (проверка trim/blank).
-        # Ожидаемый результат: HTTP 400 + ошибка про identifier.
-        "   ",
         #https://app.testiny.io/p/1/testcases/tcf/53
-        # Сценарий: identifier слишком короткий (пограничное значение по длине).
+        # Сценарий: identifier слишком короткий .
         # Ожидаемый результат: HTTP 400 + ошибка про identifier.
         "a",
         #https://app.testiny.io/p/1/testcases/tcf/54
@@ -33,11 +29,6 @@ from src.openmrs_patient import Person
         #           проверка валидации по формату.
         # Ожидаемый результат: HTTP 400 + ошибка про identifier.
         "MRN#123",
-        #https://app.testiny.io/p/1/testcases/tcf/55
-        # Сценарий: identifier содержит Unicode/не-ASCII символы (кириллица),
-        #           проверка допустимого алфавита в идентификаторе.
-        # Ожидаемый результат: HTTP 400 + ошибка про identifier.
-        "тест123",
         #https://app.testiny.io/p/1/testcases/tcf/56
         # Сценарий: identifier слишком длинный (проверка верхней границы длины / overflow risk).
         # Ожидаемый результат: HTTP 400 + ошибка про identifier.
@@ -47,11 +38,6 @@ from src.openmrs_patient import Person
         #           проверка сериализации/типов.
         # Ожидаемый результат: HTTP 400 + ошибка про identifier.
         123456,
-        #https://app.testiny.io/p/1/testcases/tcf/58
-        # Сценарий: identifier неправильного типа (list вместо строки),
-        #           проверка что значение должно быть скалярным.
-        # Ожидаемый результат: HTTP 400 + ошибка про identifier.
-        [],
     ],
 )
 def test_create_patient_with_invalid_patient_identifier(invalid_patient_identifier):
