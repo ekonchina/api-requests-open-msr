@@ -96,7 +96,7 @@ def visit_type_uuid() -> str:
 
 
 
-
+#https://app.testiny.io/p/1/testcases/tcf/49/tc/123/
 def test_create_two_visits_same_patient_sequential_success(patient_context: dict, visit_type_uuid: str):
     """
     2 визита у одного пациента — OK, если первый закрыт (есть stopDatetime).
@@ -147,6 +147,7 @@ def test_create_two_visits_same_patient_sequential_success(patient_context: dict
         location_uuid=location_uuid,
     )
 
+#https://app.testiny.io/p/1/testcases/tcf/49/tc/124
 def test_create_second_active_visit_overlapping(patient_context: dict, visit_type_uuid: str):
 
     patient_uuid = patient_context["patient_uuid"]
