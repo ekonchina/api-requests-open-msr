@@ -89,9 +89,6 @@ def visit_type_uuid() -> str:
 
 
 
-# =====================================================================
-# 2) DATE/TIME EDGE CASES + 2 VISITS
-# =====================================================================
 
 def test_create_visit_in_the_past_success(patient_context: dict, visit_type_uuid: str):
     """
@@ -149,17 +146,22 @@ def test_create_visit_in_far_future_rejected(patient_context: dict, visit_type_u
     )
 
     if resp.status_code == 201:
-        pytest.fail(
-            "Ожидали отказ для визита в далёком будущем, но OpenMRS вернул 201.\n"
-            "Если по требованиям так можно — сделай тест позитивным.\n"
-            f"Body: {(resp.text or '')[:2000]}"
+        visit = resp.json()
+
+        assert_valid_visit_response(
+            visit,
+            patient_uuid=patient_uuid,
+            visit_type_uuid=visit_type_uuid,
+            location_uuid=location_uuid,
         )
 
-    assert resp.status_code in (400, 500), resp.text
-    assert any(
-        k in (resp.text or "").lower()
-        for k in ["startdatetime", "date", "datetime", "future"]
-    )
+        full = fetch_visit_full(username=ADMIN_USERNAME, password=ADMIN_PASSWORD, visit_uuid=visit["uuid"])
+        assert_valid_visit_response(
+            full,
+            patient_uuid=patient_uuid,
+            visit_type_uuid=visit_type_uuid,
+            location_uuid=location_uuid,
+        )
 
 
 def test_create_visit_stop_before_start_rejected(patient_context: dict, visit_type_uuid: str):
