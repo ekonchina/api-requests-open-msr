@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import uuid
 import pytest
+import requests
+from requests.auth import HTTPBasicAuth
 
 from checks.visit_checks import assert_valid_visit_response
 
@@ -27,7 +29,8 @@ def iso_utc_now() -> str:
     return now.strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
 
-#TODO: need work
+#TODO: NEED WORK!
+#TODO: CREATE USERS FOR DEMO
 
 @pytest.fixture()
 def patient_context() -> dict:
@@ -62,6 +65,7 @@ def visit_type_uuid() -> str:
     return get_random_valid_visit_type()["uuid"]
 
 #TODO: все валидные типы полей
+#TODO: проверить роли
 def test_create_visit_success(patient_context: dict, visit_type_uuid: str):
     patient_uuid = patient_context["patient_uuid"]
     location_uuid = patient_context["location_uuid"]
@@ -121,10 +125,7 @@ def test_create_visit_missing_required_fields_returns_400(patient_context: dict,
 
     bad_payload = mutator(payload)
 
-    # напрямую через create_visit удобнее — но там собирается payload.
-    # поэтому вызываем requests тут же, чтобы не ломать helper:
-    import requests
-    from requests.auth import HTTPBasicAuth
+
 
     resp = requests.post(
         "http://localhost/openmrs/ws/rest/v1/visit",

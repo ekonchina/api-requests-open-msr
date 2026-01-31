@@ -11,42 +11,43 @@ from src.openmrs_patient import Person
 @pytest.mark.parametrize(
     "invalid_patient_identifier",
     [
+        #https://app.testiny.io/p/1/testcases/tcf/59
         # Сценарий: identifier отсутствует (null) / не задан.
         # Ожидаемый результат: OpenMRS отклоняет запрос на создание пациента → HTTP 400,
         #                      в тексте ошибки упоминается identifier.
         None,
-
+        #https://app.testiny.io/p/1/testcases/tcf/51
         # Сценарий: identifier задан пустой строкой.
         # Ожидаемый результат: HTTP 400 + ошибка про identifier.
         "",
-
+        #https://app.testiny.io/p/1/testcases/tcf/52
         # Сценарий: identifier состоит только из пробелов (проверка trim/blank).
         # Ожидаемый результат: HTTP 400 + ошибка про identifier.
         "   ",
-
+        #https://app.testiny.io/p/1/testcases/tcf/53
         # Сценарий: identifier слишком короткий (пограничное значение по длине).
         # Ожидаемый результат: HTTP 400 + ошибка про identifier.
         "a",
-
+        #https://app.testiny.io/p/1/testcases/tcf/54
         # Сценарий: identifier содержит недопустимые символы (например #),
         #           проверка валидации по формату.
         # Ожидаемый результат: HTTP 400 + ошибка про identifier.
         "MRN#123",
-
+        #https://app.testiny.io/p/1/testcases/tcf/55
         # Сценарий: identifier содержит Unicode/не-ASCII символы (кириллица),
         #           проверка допустимого алфавита в идентификаторе.
         # Ожидаемый результат: HTTP 400 + ошибка про identifier.
         "тест123",
-
+        #https://app.testiny.io/p/1/testcases/tcf/56
         # Сценарий: identifier слишком длинный (проверка верхней границы длины / overflow risk).
         # Ожидаемый результат: HTTP 400 + ошибка про identifier.
         "A" * 256,
-
+        #https://app.testiny.io/p/1/testcases/tcf/57
         # Сценарий: identifier неправильного типа (int вместо строки),
         #           проверка сериализации/типов.
         # Ожидаемый результат: HTTP 400 + ошибка про identifier.
         123456,
-
+        #https://app.testiny.io/p/1/testcases/tcf/58
         # Сценарий: identifier неправильного типа (list вместо строки),
         #           проверка что значение должно быть скалярным.
         # Ожидаемый результат: HTTP 400 + ошибка про identifier.
