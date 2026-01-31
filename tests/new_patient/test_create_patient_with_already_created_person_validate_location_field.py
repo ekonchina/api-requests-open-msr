@@ -23,7 +23,11 @@ from src.openmrs_patient import Person
 
 @pytest.mark.parametrize(
     "location",
-    [
+    [   #https://app.testiny.io/p/1/testcases/tcf/41/tc/76
+        # Сценарий: location отсутствует (null) / не задан.
+        # Ожидаемый результат: OpenMRS отклоняет запрос на создание пациента → HTTP 400,
+        #
+        None,
         #https://app.testiny.io/p/1/testcases/tcf/41/tc/60
         # Сценарий: location передаётся как числовая строка
         # Ожидаемый результат: HTTP 400 (не UUID и не существующая локация)
