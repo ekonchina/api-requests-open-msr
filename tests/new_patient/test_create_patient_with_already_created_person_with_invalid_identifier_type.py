@@ -9,7 +9,12 @@ from request_modules.patientidentifiertype.get_random_valid_patient_identifier_t
 
 @pytest.mark.parametrize(
     "invalid_identifier_type",
-    [   #https://app.testiny.io/p/1/testcases/tcf/42/tc/66
+    [   #https://app.testiny.io/p/1/testcases/tcf/75
+        # Сценарий: identifierType отсутствует (null) / не задан.
+        # Ожидаемый результат: OpenMRS отклоняет запрос на создание пациента → HTTP 400,
+        None,
+
+        #https://app.testiny.io/p/1/testcases/tcf/42/tc/66
         # Сценарий: identifierType передан пустой строкой.
         # Ожидаемый результат: OpenMRS отклоняет запрос → HTTP 400,
         #                      в тексте ошибки есть упоминание identifierType/identifier type.
