@@ -20,7 +20,7 @@ from src.openmrs_patient import Person
 
 @pytest.mark.parametrize(
     "username,password,privilege_level_uuid",
-    [
+    [   #https://app.testiny.io/p/1/testcases/tcf/43/tc/70/
         # Сценарий:
         # Пользователь с уровнем привилегий Full создаёт пациента с валидной Person,
         # валидным OpenMRS ID и валидной location.
@@ -30,7 +30,7 @@ from src.openmrs_patient import Person
         # ответ содержит валидную структуру пациента,
         # и пациента можно найти по identifier (GET /patient?q=...).
         ("user124", "Password123", "ab2160f6-0941-430c-9752-6714353fbd3c"),  # Full
-
+        #https://app.testiny.io/p/1/testcases/tcf/43/tc/71/
         # Сценарий:
         # Пользователь с уровнем привилегий High создаёт пациента аналогично.
         #
@@ -38,11 +38,10 @@ from src.openmrs_patient import Person
         # Создание пациента успешно, структура ответа валидна,
         # пациент находится по identifier.
         ("user125", "Password123", "f089471c-e00b-468e-96e8-46aea1b339af"),  # High
-
+        #https://app.testiny.io/p/1/testcases/tcf/43/tc/72/
         # Сценарий:
         # Пользователь "Doctor" (не full), но с привилегиями Add Patients,
         # создаёт пациента.
-        #
         # Ожидаемый результат:
         # Создание пациента успешно, структура ответа валидна,
         # пациент находится по identifier.
@@ -83,7 +82,7 @@ def test_create_patient_with_user_has_access_add_patient(username, password, pri
 # ============================================================
 # Создание пациента пользователем, у которого НЕТ прав на создание пациента
 # ============================================================
-
+#https://app.testiny.io/p/1/testcases/tcf/43/tc/73/
 @pytest.mark.parametrize(
     "username,password,privilege_level_uuid",
     [
@@ -133,7 +132,7 @@ def test_create_patient_with_user_has_no_access_add_patient(username, password, 
 # ============================================================
 # Создание пациента пользователем, который disabled/retired (или сессия запрещена)
 # ============================================================
-
+#https://app.testiny.io/p/1/testcases/tcf/43/tc/74/
 @pytest.mark.parametrize(
     "username,password,privilege_level_uuid",
     [
