@@ -93,100 +93,8 @@ def visit_type_uuid() -> str:
 # 2) DATE/TIME EDGE CASES + 2 VISITS
 # =====================================================================
 
-def test_create_visit_in_the_past_success(patient_context: dict, visit_type_uuid: str):
-    """
-    Визит в прошлом обычно допустим (исторические визиты).
-    """
-    patient_uuid = patient_context["patient_uuid"]
-    location_uuid = patient_context["location_uuid"]
-
-    start = datetime(2000, 1, 1, 10, 0, 0, tzinfo=timezone.utc)
-
-    resp = create_visit(
-        username=ADMIN_USERNAME,
-        password=ADMIN_PASSWORD,
-        patient_uuid=patient_uuid,
-        visit_type_uuid=visit_type_uuid,
-        start_datetime_iso=iso_utc(start),
-        location_uuid=location_uuid,
-    )
-    assert resp.status_code == 201, resp.text
-    visit = resp.json()
-
-    assert_valid_visit_response(
-        visit,
-        patient_uuid=patient_uuid,
-        visit_type_uuid=visit_type_uuid,
-        location_uuid=location_uuid,
-    )
-
-    full = fetch_visit_full(username=ADMIN_USERNAME, password=ADMIN_PASSWORD, visit_uuid=visit["uuid"])
-    assert_valid_visit_response(
-        full,
-        patient_uuid=patient_uuid,
-        visit_type_uuid=visit_type_uuid,
-        location_uuid=location_uuid,
-    )
 
 
-def test_create_visit_in_far_future_rejected(patient_context: dict, visit_type_uuid: str):
-    """
-    Визит в далёком будущем — часто должен отклоняться.
-    Если ваш инстанс разрешает — поменяй этот тест на позитивный.
-    """
-    patient_uuid = patient_context["patient_uuid"]
-    location_uuid = patient_context["location_uuid"]
-
-    far_future = datetime(3000, 1, 1, 10, 0, 0, tzinfo=timezone.utc)
-
-    resp = create_visit(
-        username=ADMIN_USERNAME,
-        password=ADMIN_PASSWORD,
-        patient_uuid=patient_uuid,
-        visit_type_uuid=visit_type_uuid,
-        start_datetime_iso=iso_utc(far_future),
-        location_uuid=location_uuid,
-    )
-
-    if resp.status_code == 201:
-        pytest.fail(
-            "Ожидали отказ для визита в далёком будущем, но OpenMRS вернул 201.\n"
-            "Если по требованиям так можно — сделай тест позитивным.\n"
-            f"Body: {(resp.text or '')[:2000]}"
-        )
-
-    assert resp.status_code in (400, 500), resp.text
-    assert any(
-        k in (resp.text or "").lower()
-        for k in ["startdatetime", "date", "datetime", "future"]
-    )
-
-
-def test_create_visit_stop_before_start_rejected(patient_context: dict, visit_type_uuid: str):
-    """
-    stopDatetime раньше startDatetime — неконсистентные даты.
-    """
-    patient_uuid = patient_context["patient_uuid"]
-    location_uuid = patient_context["location_uuid"]
-
-    start = datetime.now(timezone.utc)
-    stop = start - timedelta(days=1)
-
-    resp = create_visit(
-        username=ADMIN_USERNAME,
-        password=ADMIN_PASSWORD,
-        patient_uuid=patient_uuid,
-        visit_type_uuid=visit_type_uuid,
-        start_datetime_iso=iso_utc(start),
-        stop_datetime_iso=iso_utc(stop),
-        location_uuid=location_uuid,
-    )
-
-    assert resp.status_code in (400, 500), resp.text
-    assert any(
-        k in (resp.text or "").lower()
-        for k in ["stopdatetime", "startdatetime", "end date", "before", "after", "date"]
-    )
 
 
 def test_create_two_visits_same_patient_sequential_success(patient_context: dict, visit_type_uuid: str):
@@ -351,57 +259,7 @@ def test_create_visit_invalid_visit_type_field(patient_context: dict, bad_visit_
     assert any(k in (resp.text or "").lower() for k in ["visittype", "visit type", "uuid", "invalid", "not found"])
 
 
-@pytest.mark.parametrize(
-    "bad_start",
-    [
-        None,
-        "",
-        "2020-01-01",
-        "01-01-2020T10:00:00.000Z",
-        "not-a-date",
-        123,
-    ],
-)
-def test_create_visit_invalid_start_datetime(patient_context: dict, visit_type_uuid: str, bad_start):
-    patient_uuid = patient_context["patient_uuid"]
-    location_uuid = patient_context["location_uuid"]
 
-    payload = {
-        "patient": patient_uuid,
-        "visitType": visit_type_uuid,
-        "startDatetime": bad_start,
-        "location": location_uuid,
-    }
-
-    resp = post_visit_raw(username=ADMIN_USERNAME, password=ADMIN_PASSWORD, payload=payload)
-    assert resp.status_code in (400, 500), resp.text
-    assert any(k in (resp.text or "").lower() for k in ["startdatetime", "datetime", "date", "invalid"])
-
-
-@pytest.mark.parametrize(
-    "bad_stop",
-    [
-        "",
-        "not-a-date",
-        "2020-01-01",
-        123,
-    ],
-)
-def test_create_visit_invalid_stop_datetime_format(patient_context: dict, visit_type_uuid: str, bad_stop):
-    patient_uuid = patient_context["patient_uuid"]
-    location_uuid = patient_context["location_uuid"]
-
-    payload = {
-        "patient": patient_uuid,
-        "visitType": visit_type_uuid,
-        "startDatetime": iso_utc(datetime.now(timezone.utc)),
-        "stopDatetime": bad_stop,
-        "location": location_uuid,
-    }
-
-    resp = post_visit_raw(username=ADMIN_USERNAME, password=ADMIN_PASSWORD, payload=payload)
-    assert resp.status_code in (400, 500), resp.text
-    assert any(k in (resp.text or "").lower() for k in ["stopdatetime", "datetime", "date", "invalid"])
 
 
 @pytest.mark.parametrize(

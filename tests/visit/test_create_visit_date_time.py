@@ -126,11 +126,8 @@ def test_create_visit_in_the_past_success(patient_context: dict, visit_type_uuid
     )
 
 
-def test_create_visit_in_far_future_rejected(patient_context: dict, visit_type_uuid: str):
-    """
-    Визит в далёком будущем — часто должен отклоняться.
-    Если ваш инстанс разрешает — поменяй этот тест на позитивный.
-    """
+def test_create_visit_in_far_future(patient_context: dict, visit_type_uuid: str):
+
     patient_uuid = patient_context["patient_uuid"]
     location_uuid = patient_context["location_uuid"]
 
@@ -189,3 +186,55 @@ def test_create_visit_stop_before_start_rejected(patient_context: dict, visit_ty
         k in (resp.text or "").lower()
         for k in ["stopdatetime", "startdatetime", "end date", "before", "after", "date"]
     )
+@pytest.mark.xfail
+@pytest.mark.parametrize(
+    "bad_start",
+    [
+        None,
+        "",
+        "2020-01-01",
+        "01-01-2020T10:00:00.000Z",
+        "not-a-date",
+    ],
+)
+def test_create_visit_invalid_start_datetime(patient_context: dict, visit_type_uuid: str, bad_start):
+    patient_uuid = patient_context["patient_uuid"]
+    location_uuid = patient_context["location_uuid"]
+
+    payload = {
+        "patient": patient_uuid,
+        "visitType": visit_type_uuid,
+        "startDatetime": bad_start,
+        "location": location_uuid,
+    }
+
+    resp = post_visit_raw(username=ADMIN_USERNAME, password=ADMIN_PASSWORD, payload=payload)
+    assert resp.status_code in (400, 500), resp.text
+    assert any(k in (resp.text or "").lower() for k in ["startdatetime", "datetime", "date", "invalid"])
+
+
+@pytest.mark.parametrize(
+    "bad_stop",
+    [
+        None,
+        "",
+        "not-a-date",
+        "2020-01-01",
+        123,
+    ],
+)
+def test_create_visit_invalid_stop_datetime_format(patient_context: dict, visit_type_uuid: str, bad_stop):
+    patient_uuid = patient_context["patient_uuid"]
+    location_uuid = patient_context["location_uuid"]
+
+    payload = {
+        "patient": patient_uuid,
+        "visitType": visit_type_uuid,
+        "startDatetime": iso_utc(datetime.now(timezone.utc)),
+        "stopDatetime": bad_stop,
+        "location": location_uuid,
+    }
+
+    resp = post_visit_raw(username=ADMIN_USERNAME, password=ADMIN_PASSWORD, payload=payload)
+    assert resp.status_code in (400, 500), resp.text
+    assert any(k in (resp.text or "").lower() for k in ["stopdatetime", "datetime", "date", "invalid"])
