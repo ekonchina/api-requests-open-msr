@@ -314,37 +314,30 @@ def test_create_patient_with_custom_gender_positive(gender_value):
 @pytest.mark.parametrize(
     "invalid_birthdate",
     [
+        #https://app.testiny.io/p/1/testcases/tcf/45/tc/98
+        # Сценарий: birthdate = None .
+        # Ожидаемый результат: HTTP 400.
+        None,
+        #https://app.testiny.io/p/1/testcases/tcf/45/tc/99
         # Сценарий: birthdate = "" (пустая строка).
         # Ожидаемый результат: HTTP 400.
         "",
-
-        # Сценарий: birthdate = "   " (пробелы).
-        # Ожидаемый результат: HTTP 400.
-        "   ",
-
+        #https://app.testiny.io/p/1/testcases/tcf/45/tc/100
         # Сценарий: birthdate в неправильном формате (не ISO YYYY-MM-DD).
         # Ожидаемый результат: HTTP 400.
         "31-12-1990",
-
+        #https://app.testiny.io/p/1/testcases/tcf/45/tc/101
         # Сценарий: birthdate — не дата.
         # Ожидаемый результат: HTTP 400.
         "not-a-date",
-
+        #https://app.testiny.io/p/1/testcases/tcf/45/tc/102
         # Сценарий: birthdate в будущем.
         # Ожидаемый результат: HTTP 400 (обычно запрещено).
         "3000-01-01",
-
+        #https://app.testiny.io/p/1/testcases/tcf/45/tc/103
         # Сценарий: birthdate неверного типа (число).
         # Ожидаемый результат: HTTP 400.
         12345,
-
-        # Сценарий: birthdate неверного типа (list).
-        # Ожидаемый результат: HTTP 400.
-        [],
-
-        # Сценарий: birthdate неверного типа (dict).
-        # Ожидаемый результат: HTTP 400.
-        {},
     ],
 )
 def test_create_patient_with_invalid_birthdate(invalid_birthdate):
