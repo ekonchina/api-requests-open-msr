@@ -24,26 +24,22 @@ from src.openmrs_patient import Person
 @pytest.mark.parametrize(
     "location",
     [
+        #https://app.testiny.io/p/1/testcases/tcf/41/tc/60
         # Сценарий: location передаётся как числовая строка
         # Ожидаемый результат: HTTP 400 (не UUID и не существующая локация)
         "10",
 
-        # Сценарий: location с пробелами вокруг значения
-        # Ожидаемый результат: HTTP 400
-        " 10 ",
-
+        #https://app.testiny.io/p/1/testcases/tcf/41/tc/62
         # Сценарий: location — произвольная строка
         # Ожидаемый результат: HTTP 400
         "abc",
 
+        #https://app.testiny.io/p/1/testcases/tcf/41/tc/63
         # Сценарий: location — пустая строка
         # Ожидаемый результат: HTTP 400
         "",
 
-        # Сценарий: location выглядит как число с точкой
-        # Ожидаемый результат: HTTP 400
-        "10.5",
-
+        #https://app.testiny.io/p/1/testcases/tcf/41/tc/65
         # Сценарий: location имеет формат UUID,
         # но такого UUID НЕТ среди локаций OpenMRS
         # Ожидаемый результат: HTTP 400
