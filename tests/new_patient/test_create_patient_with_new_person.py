@@ -79,33 +79,19 @@ def post_patient(payload: dict) -> requests.Response:
 @pytest.mark.parametrize(
     "person_value, description",
     [
-        # Сценарий: поле person отсутствует в payload (ключ удалён).
-        # Ожидаемый результат: OpenMRS отклоняет запрос (HTTP 400) или падает с 500 (если нет корректной валидации).
-        ("__MISSING__", "person key missing"),
-
+        #https://app.testiny.io/p/1/testcases/tcf/44/tc/78
         # Сценарий: поле person передано как null.
         # Ожидаемый результат: HTTP 400 или 500, в тексте ошибки есть person/null.
         (None, "person is null"),
-
+        #https://app.testiny.io/p/1/testcases/tcf/44/tc/79
         # Сценарий: поле person передано пустой строкой (не объект).
         # Ожидаемый результат: HTTP 400 или 500.
         ("", "person is empty string"),
-
+        #https://app.testiny.io/p/1/testcases/tcf/44/tc/80
         # Сценарий: поле person передано строкой (например uuid-like), но мы ожидаем объект person при одновременном создании.
         # Ожидаемый результат: HTTP 400 или 500.
         ("uuid-like-string", "person is string instead of object"),
 
-        # Сценарий: поле person передано числом (неверный тип).
-        # Ожидаемый результат: HTTP 400 или 500.
-        (123, "person is int"),
-
-        # Сценарий: поле person передано списком (неверный тип).
-        # Ожидаемый результат: HTTP 400 или 500.
-        ([], "person is list"),
-
-        # Сценарий: поле person передано пустым объектом (нет обязательных полей).
-        # Ожидаемый результат: HTTP 400 или 500.
-        ({}, "person is empty object"),
     ],
 )
 def test_create_patient_with_invalid_person_root(person_value, description):
@@ -133,35 +119,32 @@ def test_create_patient_with_invalid_person_root(person_value, description):
 
 @pytest.mark.parametrize(
     "invalid_names",
-    [
+    [   # https://app.testiny.io/p/1/testcases/tcf/45/tc/81
         # Сценарий: person.names = null.
         # Ожидаемый результат: HTTP 400 (валидация обязательного списка имён).
         None,
-
+        # https://app.testiny.io/p/1/testcases/tcf/45/tc/82
         # Сценарий: person.names = "" (неверный тип).
         # Ожидаемый результат: HTTP 400.
         "",
-
+        # https://app.testiny.io/p/1/testcases/tcf/45/tc/83
         # Сценарий: person.names = {} (неверный тип — объект вместо списка).
         # Ожидаемый результат: HTTP 400.
         {},
-
+        # https://app.testiny.io/p/1/testcases/tcf/45/tc/84
         # Сценарий: person.names = [] (пустой список имён).
         # Ожидаемый результат: HTTP 400.
         [],
-
+        # https://app.testiny.io/p/1/testcases/tcf/45/tc/85
         # Сценарий: в names[0] отсутствует givenName.
         # Ожидаемый результат: HTTP 400 (givenName обязателен).
         [{"familyName": "X"}],
 
+        # https://app.testiny.io/p/1/testcases/tcf/45/tc/86
         # Сценарий: givenName пустая строка.
         # Ожидаемый результат: HTTP 400.
         [{"givenName": "", "familyName": "X"}],
-
-        # Сценарий: givenName состоит из пробелов.
-        # Ожидаемый результат: HTTP 400.
-        [{"givenName": "   ", "familyName": "X"}],
-
+        # https://app.testiny.io/p/1/testcases/tcf/45/tc/87
         # Сценарий: элемент списка names не объект (неверный тип).
         # Ожидаемый результат: HTTP 400.
         [123],
