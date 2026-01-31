@@ -15,9 +15,6 @@ from request_modules.patientidentifiertype.get_random_valid_patient_identifier_t
 from src.openmrs_patient import Person
 
 
-# ============================================================
-# ТЕСТЫ АВТОРИЗАЦИИ/ПРАВ НА СОЗДАНИЕ ПАЦИЕНТА
-# ============================================================
 
 
 

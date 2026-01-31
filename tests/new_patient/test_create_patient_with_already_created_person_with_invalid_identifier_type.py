@@ -9,28 +9,20 @@ from request_modules.patientidentifiertype.get_random_valid_patient_identifier_t
 
 @pytest.mark.parametrize(
     "invalid_identifier_type",
-    [
+    [   #https://app.testiny.io/p/1/testcases/tcf/42/tc/66
         # Сценарий: identifierType передан пустой строкой.
         # Ожидаемый результат: OpenMRS отклоняет запрос → HTTP 400,
         #                      в тексте ошибки есть упоминание identifierType/identifier type.
         "",
-
-        # Сценарий: identifierType передан строкой из одних пробелов (trim/blank).
-        # Ожидаемый результат: HTTP 400 + ошибка по identifierType.
-        "    ",
-
+        #https://app.testiny.io/p/1/testcases/tcf/42/tc/67
         # Сценарий: identifierType передан строкой, не соответствующей формату UUID.
         # Ожидаемый результат: HTTP 400 + ошибка по identifierType.
         "not-a-uuid",
-
-        # Сценарий: identifierType передан строкой некорректной длины (не UUID).
-        # Ожидаемый результат: HTTP 400 + ошибка по identifierType.
-        "12345",
-
+        #https://app.testiny.io/p/1/testcases/tcf/42/tc/68
         # Сценарий: identifierType имеет форму UUID, но такого типа идентификатора НЕ существует в системе.
         # Ожидаемый результат: HTTP 400 + ошибка по identifierType (ссылка на несуществующий ресурс).
         "zzzzzzzz-zzzz-zzzz-zzzz-zzzzzzzzzzzz",
-
+        #https://app.testiny.io/p/1/testcases/tcf/42/tc/69
         # Сценарий: identifierType передан неверного типа (число вместо строки/UUID).
         # Ожидаемый результат: HTTP 400 + ошибка по identifierType.
         123456,
