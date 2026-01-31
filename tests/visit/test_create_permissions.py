@@ -99,9 +99,11 @@ def visit_type_uuid() -> str:
 @pytest.mark.parametrize(
     "username,password,comment",
     [
+        #https://app.testiny.io/p/1/testcases/tcf/47/tc/104/
         ("user124", "Password123", "Full user should create visit"),
+        #https://app.testiny.io/p/1/testcases/tcf/47/tc/105/
         ("user125", "Password123", "High user should create visit"),
-        # Если на вашем стенде Doctor НЕ может создавать визиты — перенеси в негативные
+        #https://app.testiny.io/p/1/testcases/tcf/47/tc/106/
         ("user220", "Password123", "Doctor might be allowed to create visits depending on roles"),
     ],
 )
@@ -142,8 +144,11 @@ def test_create_visit_permissions_positive(
 @pytest.mark.parametrize(
     "username,password,comment",
     [
+        #https://app.testiny.io/p/1/testcases/tcf/47/tc/107/
         ("user215", "Password123", "User without visit privileges should be rejected"),
+        #https://app.testiny.io/p/1/testcases/tcf/47/tc/108/
         ("user225", "Password123", "Retired/disabled user should be rejected"),
+        #https://app.testiny.io/p/1/testcases/tcf/47/tc/109/
         ("deleted_user_does_not_exist_999", "Password123", "Non-existent (deleted) user should be rejected"),
     ],
 )
