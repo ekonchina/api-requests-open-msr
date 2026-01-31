@@ -170,10 +170,7 @@ def test_create_visit_invalid_patient_field(patient_context: dict, visit_type_uu
 
     resp = post_visit_raw(username=ADMIN_USERNAME, password=ADMIN_PASSWORD, payload=payload)
 
-    if is_uuid_like(bad_patient):
-        assert resp.status_code in (400, 404, 500)
-    else:
-        assert resp.status_code in (400, 500)
+    assert resp.status_code in (400)
 
 
 # TC-126 https://app.testiny.io/p/1/testcases/tcf/50/tc/126/
@@ -190,7 +187,7 @@ def test_create_visit_invalid_visit_type_field(patient_context: dict, bad_visit_
     }
 
     resp = post_visit_raw(username=ADMIN_USERNAME, password=ADMIN_PASSWORD, payload=payload)
-    assert resp.status_code in (400, 404, 500)
+    assert resp.status_code in (400)
 
 
 # TC-127 https://app.testiny.io/p/1/testcases/tcf/50/tc/127/
@@ -208,7 +205,7 @@ def test_create_visit_invalid_location(patient_context: dict, visit_type_uuid: s
     }
 
     resp = post_visit_raw(username=ADMIN_USERNAME, password=ADMIN_PASSWORD, payload=payload)
-    assert resp.status_code in (400, 404, 500)
+    assert resp.status_code in (400)
 
 
 # TC-128 https://app.testiny.io/p/1/testcases/tcf/50/tc/128/
@@ -219,7 +216,6 @@ def test_create_visit_with_indication_success(patient_context: dict, visit_type_
         location_uuid=patient_context["location_uuid"],
         indication="Follow-up visit",
     )
-    assert_500_is_xfail(resp)
     assert resp.status_code in (200, 201)
 
 
@@ -232,8 +228,7 @@ def test_create_visit_invalid_indication_type(patient_context: dict, visit_type_
         location_uuid=patient_context["location_uuid"],
         indication=bad_indication,
     )
-    assert_500_is_xfail(resp)
-    assert resp.status_code in (400, 500)
+    assert resp.status_code in (400)
 
 
 # TC-130 https://app.testiny.io/p/1/testcases/tcf/50/tc/130/
@@ -243,7 +238,6 @@ def test_create_visit_without_encounters_success(patient_context: dict, visit_ty
         visit_type_uuid=visit_type_uuid,
         location_uuid=patient_context["location_uuid"],
     )
-    assert_500_is_xfail(resp)
     assert resp.status_code in (200, 201)
 
 
@@ -260,7 +254,7 @@ def test_create_visit_invalid_encounters_field(patient_context: dict, visit_type
         encounters=bad_encounters,
     )
     assert_500_is_xfail(resp)
-    assert resp.status_code in (400, 404, 500)
+    assert resp.status_code in (400)
 
 
 # TC-132 https://app.testiny.io/p/1/testcases/tcf/50/tc/132/
