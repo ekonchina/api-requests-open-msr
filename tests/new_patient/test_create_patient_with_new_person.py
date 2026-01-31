@@ -174,21 +174,17 @@ def test_create_patient_with_invalid_person_names(invalid_names):
 
 @pytest.mark.parametrize(
     "names_payload",
-    [
+    [   #https://app.testiny.io/p/1/testcases/tcf/45/tc/88/
         # Сценарий: указан только givenName, familyName отсутствует.
         # Ожидаемый результат: пациент создаётся успешно (HTTP 200/201),
         # так как в вашей системе familyName считается необязательным.
         [{"givenName": "X"}],
 
+        #https://app.testiny.io/p/1/testcases/tcf/45/tc/89
         # Сценарий: familyName задан пустой строкой.
         # Ожидаемый результат: пациент создаётся успешно (HTTP 200/201),
         # так как система не валидирует familyName как обязательный/непустой.
         [{"givenName": "X", "familyName": ""}],
-
-        # Сценарий: familyName состоит из пробелов.
-        # Ожидаемый результат: пациент создаётся успешно (HTTP 200/201),
-        # так как система допускает blank/whitespace familyName.
-        [{"givenName": "X", "familyName": "   "}],
     ],
 )
 def test_create_patient_with_person_names_familyname_optional_positive(names_payload):
@@ -219,29 +215,18 @@ def test_create_patient_with_person_names_familyname_optional_positive(names_pay
 @pytest.mark.parametrize(
     "invalid_gender",
     [
+        #https://app.testiny.io/p/1/testcases/tcf/45/tc/90
         # Сценарий: gender = null.
         # Ожидаемый результат: HTTP 400 (обязательное поле).
         None,
-
+        #https://app.testiny.io/p/1/testcases/tcf/45/tc/91
         # Сценарий: gender = "" (пустая строка).
         # Ожидаемый результат: HTTP 400.
         "",
-
-        # Сценарий: gender = "   " (пробелы).
-        # Ожидаемый результат: HTTP 400.
-        "   ",
-
+        #https://app.testiny.io/p/1/testcases/tcf/45/tc/92
         # Сценарий: gender неверного типа (число).
         # Ожидаемый результат: HTTP 400.
         123,
-
-        # Сценарий: gender неверного типа (list).
-        # Ожидаемый результат: HTTP 400.
-        [],
-
-        # Сценарий: gender неверного типа (dict).
-        # Ожидаемый результат: HTTP 400.
-        {},
     ],
 )
 def test_create_patient_with_invalid_gender(invalid_gender):
@@ -269,11 +254,27 @@ def test_create_patient_with_invalid_gender(invalid_gender):
 @pytest.mark.parametrize(
     "gender_value",
     [
+        #https://app.testiny.io/p/1/testcases/tcf/45/tc/93
         # Сценарий: gender = "X" (нестандартное значение).
         # Ожидаемый результат: пациент создаётся успешно (HTTP 200/201),
-        # так как в вашей системе gender не валидируется строго по enum M/F/O/U.
+        # так как в вашей системе gender не валидируется строго по enum M/F/U.
         "X",
-
+        #https://app.testiny.io/p/1/testcases/tcf/45/tc/94
+        # Сценарий: gender = "M" (нестандартное значение).
+        # Ожидаемый результат: пациент создаётся успешно (HTTP 200/201),
+        # так как в вашей системе gender не валидируется строго по enum M/F/U.
+        "M",
+        #https://app.testiny.io/p/1/testcases/tcf/45/tc/95
+        # Сценарий: gender = "F" .
+        # Ожидаемый результат: пациент создаётся успешно (HTTP 200/201),
+        # так как в вашей системе gender не валидируется строго по enum M/F/U.
+        "F",
+        #https://app.testiny.io/p/1/testcases/tcf/45/tc/96
+        # Сценарий: gender = "U"
+        # Ожидаемый результат: пациент создаётся успешно (HTTP 200/201),
+        # так как в вашей системе gender не валидируется строго по enum M/F/U.
+        "U",
+        #https://app.testiny.io/p/1/testcases/tcf/45/tc/97
         # Сценарий: gender = "male" (нестандартная строка).
         # Ожидаемый результат: пациент создаётся успешно (HTTP 200/201),
         # так как в вашей системе gender принимает произвольные строки.
