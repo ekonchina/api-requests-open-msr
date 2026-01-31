@@ -86,10 +86,8 @@ def visit_type_uuid() -> str:
     return get_random_valid_visit_type()["uuid"]
 
 
-
-
-
-
+# TC-110
+# https://app.testiny.io/p/1/testcases/tcf/46/tc/110/
 def test_create_visit_in_the_past_success(patient_context: dict, visit_type_uuid: str):
     """
     Визит в прошлом обычно допустим (исторические визиты).
@@ -126,6 +124,8 @@ def test_create_visit_in_the_past_success(patient_context: dict, visit_type_uuid
     )
 
 
+# TC-111
+# https://app.testiny.io/p/1/testcases/tcf/46/tc/111/
 def test_create_visit_in_far_future(patient_context: dict, visit_type_uuid: str):
 
     patient_uuid = patient_context["patient_uuid"]
@@ -161,6 +161,8 @@ def test_create_visit_in_far_future(patient_context: dict, visit_type_uuid: str)
         )
 
 
+# TC-112
+# https://app.testiny.io/p/1/testcases/tcf/46/tc/112/
 def test_create_visit_stop_before_start_rejected(patient_context: dict, visit_type_uuid: str):
     """
     stopDatetime раньше startDatetime — неконсистентные даты.
@@ -186,6 +188,13 @@ def test_create_visit_stop_before_start_rejected(patient_context: dict, visit_ty
         k in (resp.text or "").lower()
         for k in ["stopdatetime", "startdatetime", "end date", "before", "after", "date"]
     )
+
+
+# TC-118, TC-119, TC-120, TC-121
+# https://app.testiny.io/p/1/testcases/tcf/46/tc/118/
+# https://app.testiny.io/p/1/testcases/tcf/46/tc/119/
+# https://app.testiny.io/p/1/testcases/tcf/46/tc/120/
+# https://app.testiny.io/p/1/testcases/tcf/46/tc/121/
 @pytest.mark.xfail
 @pytest.mark.parametrize(
     "bad_start",
@@ -213,6 +222,12 @@ def test_create_visit_invalid_start_datetime(patient_context: dict, visit_type_u
     assert any(k in (resp.text or "").lower() for k in ["startdatetime", "datetime", "date", "invalid"])
 
 
+# TC-113, TC-114, TC-115, TC-116, TC-117
+# https://app.testiny.io/p/1/testcases/tcf/46/tc/113/
+# https://app.testiny.io/p/1/testcases/tcf/46/tc/114/
+# https://app.testiny.io/p/1/testcases/tcf/46/tc/115/
+# https://app.testiny.io/p/1/testcases/tcf/46/tc/116/
+# https://app.testiny.io/p/1/testcases/tcf/46/tc/117/
 @pytest.mark.parametrize(
     "bad_stop",
     [
