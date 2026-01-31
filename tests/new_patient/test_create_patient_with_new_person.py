@@ -314,10 +314,6 @@ def test_create_patient_with_custom_gender_positive(gender_value):
 @pytest.mark.parametrize(
     "invalid_birthdate",
     [
-        #https://app.testiny.io/p/1/testcases/tcf/45/tc/98
-        # Сценарий: birthdate = None .
-        # Ожидаемый результат: HTTP 400.
-        None,
         #https://app.testiny.io/p/1/testcases/tcf/45/tc/99
         # Сценарий: birthdate = "" (пустая строка).
         # Ожидаемый результат: HTTP 400.
@@ -359,7 +355,7 @@ def test_create_patient_with_invalid_birthdate(invalid_birthdate):
 
 
 # ============================================================
-# 4b) person.birthdate = null — POSITIVE
+# person.birthdate = null — POSITIVE
 # ============================================================
 
 def test_create_patient_with_null_birthdate_positive():
